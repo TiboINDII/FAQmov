@@ -5,11 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>INDII Movie Creator</title>
     <link rel="stylesheet" href="styles.css">
+    <!-- PDF.js library for PDF rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // Set PDF.js worker path
+        if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+    </script>
 </head>
 <body>
     <div class="app-container">
         <header class="app-header">
-            <div class="logo">INDII Movie Creator</div>
+            <div class="logo"><img src="logo.svg" alt="INDII Movie Creator" class="logo-image"></div>
             <div class="toolbar">
                 <div class="title-input">
                     <label for="videoTitle">Start Screen Title:</label>

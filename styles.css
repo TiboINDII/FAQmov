@@ -35,19 +35,14 @@ body {
 }
 
 .logo {
-    font-size: 1.7rem;
-    font-weight: 700;
-    color: white;
-    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
-    letter-spacing: 0.5px;
     display: flex;
     align-items: center;
 }
 
-.logo::before {
-    content: "🎬";
-    margin-right: 10px;
-    font-size: 1.8rem;
+.logo-image {
+    height: 40px; /* Adjust height as needed */
+    width: auto;
+    filter: brightness(0) invert(1); /* Make SVG white */
 }
 
 .toolbar {
@@ -157,31 +152,33 @@ body {
 /* Button styles */
 .btn {
     padding: 8px 16px;
-    background-color: rgba(0, 99, 99, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    background-color: #004d40; /* Dark green background */
+    border: 1px solid #00695c;
     border-radius: 6px;
     font-size: 0.9rem;
     cursor: pointer;
     transition: all 0.2s ease;
     color: white;
     font-weight: 500;
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
 .btn:hover {
-    background-color: rgba(255, 255, 255, 0.3);
+    background-color: #00695c; /* Slightly lighter green on hover */
     transform: translateY(-1px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2);
 }
 
 .btn.primary {
-    background-color: #02a19f; /* Lighter shade of the header color */
+    background-color: #00796b; /* Brighter green for primary buttons */
     color: white;
-    border-color: #02b5b3;
+    border-color: #009688;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .btn.primary:hover {
-    background-color: #03b8b6;
+    background-color: #009688;
     box-shadow: 0 3px 6px rgba(0, 0, 0, 0.25);
 }
 
@@ -244,9 +241,11 @@ body {
     flex: 1;
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 15px; /* Increased gap for better spacing */
     overflow-y: auto;
     padding: 15px;
+    align-content: flex-start; /* Align items to the top */
+    justify-content: flex-start; /* Align items to the left */
 }
 
 .empty-state {
@@ -286,6 +285,12 @@ body {
     padding: 0;
     margin: 0;
     box-sizing: border-box;
+    transition: box-shadow 0.3s ease;
+}
+
+/* Add a subtle glow effect when touch actions can be added */
+.preview-container.touch-ready {
+    box-shadow: inset 0 0 20px 5px rgba(88, 194, 182, 0.5); /* Use the touch action color */
 }
 
 .preview-frame {
@@ -549,7 +554,7 @@ body {
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    background-color: #016362; /* Match header color */
+    background-color: #004d40; /* Dark green to match buttons */
     color: white;
     border: none;
     cursor: pointer;
@@ -558,7 +563,7 @@ body {
 }
 
 .control-btn:hover {
-    background-color: #02a19f; /* Lighter shade */
+    background-color: #00695c; /* Slightly lighter green on hover */
     transform: translateY(-1px);
     box-shadow: 0 3px 6px rgba(0, 0, 0, 0.25);
 }
@@ -599,18 +604,24 @@ body {
     cursor: grab;
     width: 100px;
     text-align: center;
+    margin-bottom: 10px; /* Add margin for better spacing */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); /* Add subtle shadow for depth */
+    transition: transform 0.2s ease, box-shadow 0.2s ease; /* Smooth transition for hover effects */
 }
 
 .media-item:hover {
     background-color: #f0f0f0;
+    transform: translateY(-2px); /* Slight lift effect on hover */
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15); /* Enhanced shadow on hover */
 }
 
 .media-item img {
     width: 70px;
     height: 70px;
-    object-fit: cover;
+    object-fit: contain; /* Changed from 'cover' to 'contain' to show the full image */
     margin-bottom: 8px;
     border-radius: 3px;
+    background-color: #eee; /* Light background to make transparent images visible */
 }
 
 .media-item .media-info {
@@ -647,9 +658,53 @@ body {
     overflow: hidden;
 }
 
+/* Ensure touch-action-clip overrides timeline-clip styles */
+.clip.touch-action-clip {
+    background-color: #ff0000 !important;
+    height: 80% !important;
+    margin-top: 5px !important;
+    justify-content: space-between !important;
+    padding: 0 5px !important;
+    overflow: visible !important;
+    z-index: 10 !important;
+    min-width: 80px !important; /* Ensure minimum width for content */
+}
+
 .timeline-clip img {
     height: 100%;
     width: auto;
+}
+
+/* Start screen clip styling */
+.timeline-clip.start-screen-clip {
+    background-color: #016362; /* Match header color */
+    border: 1px solid #015150;
+    color: white;
+    font-weight: bold;
+    z-index: 10; /* Ensure it's above other clips */
+}
+
+.timeline-clip.start-screen-clip img {
+    height: 100%;
+    width: auto;
+    opacity: 0.7; /* Make the image semi-transparent */
+    object-fit: cover;
+}
+
+.timeline-clip.start-screen-clip .clip-label {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    background-color: rgba(1, 99, 98, 0.5); /* Semi-transparent background */
+    z-index: 2;
 }
 
 .clip-resize-handle {
@@ -744,42 +799,110 @@ body {
 
 /* Touch action clip on timeline */
 .touch-action-clip {
-    background-color: #ff0000; /* Changed to red to match the touch action */
+    background-color: #ff0000 !important; /* Red background with !important to override any other styles */
     display: flex;
     align-items: center;
-    justify-content: space-between; /* Changed to space-between for better button placement */
+    justify-content: space-between;
     color: white;
     font-size: 12px;
     font-weight: bold;
-    padding: 0 5px; /* Added padding for better spacing */
-    border: 2px solid #ff5252; /* Added border for better visibility */
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); /* Added shadow for depth */
+    padding: 0 5px;
+    border: 2px solid #ff5252;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    height: 80%; /* Slightly reduced height for better appearance */
+    margin-top: 5px; /* Center vertically in the track */
+    overflow: visible !important; /* Make sure content is visible */
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+/* Selected touch action clip */
+.touch-action-clip.selected {
+    box-shadow: 0 0 10px rgba(255, 82, 82, 0.8);
+    border: 2px solid #ffffff;
+    z-index: 100;
+    transform: translateY(-2px);
+}
+
+/* Style for the label container */
+.touch-action-clip .label-container {
+    display: flex !important;
+    align-items: center !important;
+    background-color: #ff0000;
+    flex-grow: 1;
+    min-width: 0; /* Allow container to shrink below content size */
+    padding: 2px 0;
+    white-space: nowrap;
+    overflow: visible !important; /* Make sure content is visible */
+    z-index: 5;
+    position: relative;
+}
+
+/* Style for the touch label */
+.touch-action-clip .touch-label {
+    background-color: #ff0000;
+    color: white !important;
+    font-weight: bold !important;
+    font-size: 12px !important;
+    padding-right: 2px;
+    display: inline-block !important;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5); /* Add text shadow for better visibility */
+}
+
+/* Style for the position info */
+.touch-action-clip .pos-info {
+    background-color: #ff0000;
+    color: white !important;
+    font-size: 11px !important;
+    font-weight: bold !important;
+    opacity: 1 !important;
+    margin-left: 5px;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5); /* Add text shadow for better visibility */
+    display: inline-block !important;
+    padding: 0 3px;
 }
 
 .touch-action-clip::before {
     content: "👆";
     margin-right: 3px;
+    display: inline-block;
+    background-color: #ff0000;
 }
 
 /* Touch action remove button */
 .touch-remove-btn {
-    background-color: white;
-    color: #ff0000;
-    border: none;
+    background-color: white !important; /* Override the parent's background color */
+    color: #ff0000 !important;
+    border: 1px solid #ff0000 !important;
     border-radius: 3px;
     width: 18px;
     height: 18px;
     font-size: 14px;
     font-weight: bold;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     cursor: pointer;
     margin-left: 5px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5) !important; /* Enhanced shadow for better visibility */
+    transition: all 0.2s ease; /* Smooth transition for hover effects */
+    position: relative !important; /* Ensure it's above other elements */
+    z-index: 10 !important; /* Higher z-index to ensure visibility */
+    overflow: visible !important;
 }
 
 .touch-remove-btn:hover {
-    background-color: #ffdddd;
+    background-color: #ffdddd !important; /* Override with !important */
+    transform: scale(1.1); /* Slightly enlarge on hover */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.6) !important; /* Enhanced shadow on hover */
+}
+
+/* Ensure touch action clips have proper cursor */
+.touch-action-clip {
+    cursor: grab;
+}
+
+.touch-action-clip:active {
+    cursor: grabbing;
 }
 
 /* Audio waveform */
@@ -825,7 +948,53 @@ body {
 .export-modal-content h3 {
     margin-top: 0;
     margin-bottom: 20px;
-    color: #2c3e50;
+    color: #004d40; /* Match dark green button color */
+    font-size: 1.5rem;
+}
+
+.export-description {
+    margin-bottom: 20px;
+    color: #555;
+    line-height: 1.5;
+}
+
+.export-format-info {
+    margin: 10px 0 20px;
+    color: #004d40; /* Match dark green button color */
+    font-weight: bold;
+}
+
+.format-selection-container {
+    margin-bottom: 25px;
+}
+
+.format-select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+    color: #333;
+    background-color: #f9f9f9;
+    cursor: pointer;
+}
+
+.format-select:focus {
+    outline: none;
+    border-color: #004d40; /* Match dark green button color */
+    box-shadow: 0 0 0 2px rgba(0, 77, 64, 0.2);
+}
+
+.button-container {
+    display: flex;
+    justify-content: space-between;
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.button-container .btn {
+    flex: 1;
+    padding: 10px 0;
 }
 
 .progress-container {
@@ -838,7 +1007,7 @@ body {
 }
 
 .progress-bar {
-    background-color: #016362; /* Match header color */
+    background-color: #00796b; /* Match primary button color */
     height: 100%;
     width: 0;
     transition: width 0.3s ease;
@@ -890,7 +1059,7 @@ body {
 }
 
 .video-preview-close:hover {
-    color: #016362; /* Match header color */
+    color: #004d40; /* Match dark green button color */
 }
 
 .video-container {

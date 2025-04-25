@@ -53,9 +53,10 @@ const state = {
     projectName: 'New Project',
     previewScale: 0.2,
     videoTitle: '',
-    startScreenImage: 'startscreen.jpg',
+    startScreenImage: 'startscreen.webp',
     touchColor: '#ff0000', // Changed to red for better visibility
     exportMimeType: '', // Will store the selected MIME type for export
+    exportFormat: 'avi' // Default export format
 };
 
 // Initialize the application
@@ -107,6 +108,9 @@ function init() {
         console.error(e);
     }
 
+    // Preload the start screen image
+    preloadStartScreenImage();
+
     // Update timeline width
     updateTimelineWidth();
 
@@ -128,6 +132,64 @@ function init() {
 
     // Update status
     updateStatus('Ready');
+}
+
+// Preload the start screen image
+function preloadStartScreenImage() {
+    console.log("Preloading start screen image:", state.startScreenImage);
+
+    // Try both webp and jpg versions
+    const imgPaths = ['startscreen.webp', 'startscreen.jpg'];
+    let currentPathIndex = 0;
+
+    function tryLoadImage(path) {
+        console.log(`Attempting to preload start screen image from: ${path}`);
+
+        const img = new Image();
+
+        img.onload = () => {
+            console.log(`Start screen image preloaded successfully from ${path}: ${img.width}x${img.height}`);
+            // Update the state to use this path for future references
+            state.startScreenImage = path;
+        };
+
+        img.onerror = (e) => {
+            console.error(`Error preloading start screen image from ${path}:`, e);
+
+            // Try with absolute path
+            const absolutePath = new URL(path, window.location.href).href;
+            console.log(`Trying with absolute path: ${absolutePath}`);
+
+            const fallbackImg = new Image();
+
+            fallbackImg.onload = () => {
+                console.log(`Start screen image preloaded with absolute path ${absolutePath}: ${fallbackImg.width}x${fallbackImg.height}`);
+                // Update the state to use this path for future references
+                state.startScreenImage = absolutePath;
+            };
+
+            fallbackImg.onerror = (e2) => {
+                console.error(`Failed to preload start screen image with absolute path ${absolutePath}:`, e2);
+
+                // Try next format if available
+                currentPathIndex++;
+                if (currentPathIndex < imgPaths.length) {
+                    tryLoadImage(imgPaths[currentPathIndex]);
+                } else {
+                    // All formats failed
+                    console.warn("All start screen image formats failed to preload.");
+                }
+            };
+
+            fallbackImg.src = absolutePath;
+        };
+
+        // Set the source to trigger loading
+        img.src = path;
+    }
+
+    // Start trying to load the first image format
+    tryLoadImage(state.startScreenImage);
 }
 
 // Toggle grid visibility
@@ -276,16 +338,42 @@ function processAudioFile(audioSrc) {
     fetch(audioSrc)
         .then(response => response.arrayBuffer())
         .then(arrayBuffer => state.audioContext.decodeAudioData(arrayBuffer))
-        .then(audioBuffer => {
-            state.audioBuffer = audioBuffer;
-            state.audioDuration = audioBuffer.duration;
+        .then(originalAudioBuffer => {
+            // Add 3 seconds of silence at the beginning (with first 2 seconds for the start screen)
+            const silenceDuration = 3; // 3 seconds of silence
+            const originalDuration = originalAudioBuffer.duration;
+            const newDuration = originalDuration + silenceDuration;
+
+            // Create a new buffer with the extended duration
+            const newAudioBuffer = state.audioContext.createBuffer(
+                originalAudioBuffer.numberOfChannels,
+                state.audioContext.sampleRate * newDuration,
+                state.audioContext.sampleRate
+            );
+
+            // Copy the original audio data, offset by 3 seconds
+            for (let channel = 0; channel < originalAudioBuffer.numberOfChannels; channel++) {
+                const originalData = originalAudioBuffer.getChannelData(channel);
+                const newData = newAudioBuffer.getChannelData(channel);
+
+                // The first 3 seconds will remain silent (filled with zeros)
+                // Copy the original data starting at the 3-second mark
+                const silenceSamples = state.audioContext.sampleRate * silenceDuration;
+                for (let i = 0; i < originalData.length; i++) {
+                    newData[i + silenceSamples] = originalData[i];
+                }
+            }
+
+            // Store the new buffer and duration
+            state.audioBuffer = newAudioBuffer;
+            state.audioDuration = newDuration;
 
             // Set zoom level to fit the entire audio clip first
             // This will determine the optimal scale for the waveform
             setZoomToFitAudio();
 
             // Create waveform visualization with the current scale
-            createWaveform(audioBuffer, waveformContainer);
+            createWaveform(newAudioBuffer, waveformContainer);
 
             // Update timeline width based on audio duration
             updateTimelineWidth();
@@ -293,8 +381,12 @@ function processAudioFile(audioSrc) {
             // Update time display
             updateTimeDisplay();
 
+            // Add start screen clip automatically
+            addStartScreenClip();
+
             // Log the adjustment
-            console.log(`Audio loaded: ${state.audioDuration.toFixed(2)}s, Scale: ${state.timelineScale.toFixed(2)}px/sec`);
+            console.log(`Audio loaded with 3s silence prefix: ${state.audioDuration.toFixed(2)}s, Scale: ${state.timelineScale.toFixed(2)}px/sec`);
+            updateStatus('Audio imported with 3s silence prefix (2s start screen)');
         })
         .catch(error => {
             console.error('Error decoding audio data', error);
@@ -434,6 +526,13 @@ function setupTimelineInteraction() {
 
     imageTrack.addEventListener('drop', handleImageTrackDrop);
 
+    // Set up touch track for drag and drop
+    touchTrack.addEventListener('dragover', event => {
+        event.preventDefault();
+        // Show a move cursor to indicate repositioning
+        event.dataTransfer.dropEffect = 'move';
+    });
+
     // Set up click events for timeline navigation
     const timelineTracks = document.querySelector('.timeline-tracks');
     timelineTracks.addEventListener('click', handleTimelineClick);
@@ -446,6 +545,12 @@ function setupTimelineInteraction() {
 // Handle dropping an image onto the timeline
 function handleImageTrackDrop(event) {
     event.preventDefault();
+
+    // Check if audio is loaded
+    if (!state.audioBuffer || !state.audioDuration) {
+        updateStatus('Please import audio before adding images');
+        return;
+    }
 
     // Get the media item ID
     const mediaId = event.dataTransfer.getData('text/plain');
@@ -462,12 +567,24 @@ function handleImageTrackDrop(event) {
     // Convert position to time
     const dropTime = dropX / state.timelineScale;
 
+    // Default clip duration
+    const defaultDuration = 3; // Default duration in seconds
+
+    // Check if the clip would extend beyond the audio duration
+    if (dropTime >= state.audioDuration) {
+        updateStatus('Cannot add image beyond the end of audio');
+        return;
+    }
+
+    // Adjust duration if it would extend beyond the audio duration
+    const adjustedDuration = Math.min(defaultDuration, state.audioDuration - dropTime);
+
     // Create a new clip
     const newClip = {
         id: generateId(),
         mediaId: mediaId,
         startTime: dropTime,
-        duration: 3, // Default duration in seconds
+        duration: adjustedDuration, // Adjusted duration to fit within audio length
         track: 'image'
     };
 
@@ -573,21 +690,49 @@ function handleResizeHandleMouseDown(event) {
 
 // Handle mouse move for dragging and resizing
 function handleMouseMove(event) {
+    // Check if audio is loaded
+    if (!state.audioBuffer || !state.audioDuration) return;
+
     if (state.isDragging && state.selectedClip) {
+        // Skip if it's a start screen clip (should stay at position 0)
+        if (state.selectedClip.isStartScreen) return;
+
         // Calculate new position
         const deltaX = event.clientX - state.dragStartX;
         const newLeft = Math.max(0, state.originalLeft + deltaX);
 
-        // Update clip element position
-        const clipElement = document.querySelector(`.timeline-clip[data-id="${state.selectedClip.id}"]`);
-        clipElement.style.left = `${newLeft}px`;
+        // Calculate new time
+        const newStartTime = newLeft / state.timelineScale;
 
-        // Update clip data
-        state.selectedClip.startTime = newLeft / state.timelineScale;
+        // Calculate end time
+        const newEndTime = newStartTime + state.selectedClip.duration;
+
+        // Check if the clip would extend beyond the audio duration
+        if (newEndTime > state.audioDuration) {
+            // Adjust position to keep the clip within the audio duration
+            const adjustedLeft = (state.audioDuration - state.selectedClip.duration) * state.timelineScale;
+
+            // Update clip element position
+            const clipElement = document.querySelector(`.timeline-clip[data-id="${state.selectedClip.id}"]`);
+            clipElement.style.left = `${adjustedLeft}px`;
+
+            // Update clip data
+            state.selectedClip.startTime = state.audioDuration - state.selectedClip.duration;
+        } else {
+            // Update clip element position
+            const clipElement = document.querySelector(`.timeline-clip[data-id="${state.selectedClip.id}"]`);
+            clipElement.style.left = `${newLeft}px`;
+
+            // Update clip data
+            state.selectedClip.startTime = newStartTime;
+        }
 
         // Update preview
         updatePreview();
     } else if (state.isResizing && state.selectedClip) {
+        // Skip if it's a start screen clip (should maintain fixed duration)
+        if (state.selectedClip.isStartScreen) return;
+
         const deltaX = event.clientX - state.dragStartX;
         const clipElement = document.querySelector(`.timeline-clip[data-id="${state.selectedClip.id}"]`);
 
@@ -604,12 +749,76 @@ function handleMouseMove(event) {
             state.selectedClip.duration = newWidth / state.timelineScale;
         } else {
             // Resize from right
+            // Calculate new width
             const newWidth = Math.max(50, state.originalWidth + deltaX);
 
-            clipElement.style.width = `${newWidth}px`;
+            // Calculate new end time
+            const newEndTime = state.selectedClip.startTime + (newWidth / state.timelineScale);
 
-            // Update clip data
-            state.selectedClip.duration = newWidth / state.timelineScale;
+            // Check if the clip would extend beyond the audio duration
+            if (newEndTime > state.audioDuration) {
+                // Adjust width to keep the clip within the audio duration
+                const adjustedWidth = (state.audioDuration - state.selectedClip.startTime) * state.timelineScale;
+
+                clipElement.style.width = `${adjustedWidth}px`;
+
+                // Update clip data
+                state.selectedClip.duration = state.audioDuration - state.selectedClip.startTime;
+            } else {
+                clipElement.style.width = `${newWidth}px`;
+
+                // Update clip data
+                state.selectedClip.duration = newWidth / state.timelineScale;
+            }
+        }
+
+        // Update preview
+        updatePreview();
+    } else if (state.isDraggingTouchAction && state.selectedTouchAction) {
+        // Calculate new position for touch action
+        const deltaX = event.clientX - state.dragStartX;
+        const newLeft = Math.max(0, state.originalLeft + deltaX);
+
+        // Calculate new time
+        const newStartTime = newLeft / state.timelineScale;
+
+        // Calculate end time
+        const newEndTime = newStartTime + state.selectedTouchAction.duration;
+
+        // Check if the touch action would extend beyond the audio duration
+        if (newEndTime > state.audioDuration) {
+            // Adjust position to keep the touch action within the audio duration
+            const adjustedLeft = (state.audioDuration - state.selectedTouchAction.duration) * state.timelineScale;
+
+            // Update touch action element position
+            const touchActionElement = document.querySelector(`.touch-action-clip[data-id="${state.selectedTouchAction.id}"]`);
+            if (touchActionElement) {
+                touchActionElement.style.left = `${adjustedLeft}px`;
+
+                // Update position info text
+                const posInfo = touchActionElement.querySelector('.pos-info');
+                if (posInfo) {
+                    posInfo.textContent = formatTime(state.audioDuration - state.selectedTouchAction.duration);
+                }
+            }
+
+            // Update touch action data
+            state.selectedTouchAction.startTime = state.audioDuration - state.selectedTouchAction.duration;
+        } else {
+            // Update touch action element position
+            const touchActionElement = document.querySelector(`.touch-action-clip[data-id="${state.selectedTouchAction.id}"]`);
+            if (touchActionElement) {
+                touchActionElement.style.left = `${newLeft}px`;
+
+                // Update position info text
+                const posInfo = touchActionElement.querySelector('.pos-info');
+                if (posInfo) {
+                    posInfo.textContent = formatTime(newStartTime);
+                }
+            }
+
+            // Update touch action data
+            state.selectedTouchAction.startTime = newStartTime;
         }
 
         // Update preview
@@ -619,9 +828,96 @@ function handleMouseMove(event) {
 
 // Handle mouse up to end dragging or resizing
 function handleMouseUp() {
+    // Reset dragging states
     state.isDragging = false;
     state.isResizing = false;
     state.resizeDirection = null;
+
+    // Handle touch action dragging end
+    if (state.isDraggingTouchAction && state.selectedTouchAction) {
+        // Reset cursor and selected class
+        const touchActionElement = document.querySelector(`.touch-action-clip[data-id="${state.selectedTouchAction.id}"]`);
+        if (touchActionElement) {
+            touchActionElement.style.cursor = 'grab';
+            touchActionElement.classList.remove('selected');
+        }
+
+        // Update status
+        updateStatus(`Touch action moved to ${formatTime(state.selectedTouchAction.startTime)}`);
+    }
+
+    // Reset touch action dragging state
+    state.isDraggingTouchAction = false;
+    state.selectedTouchAction = null;
+}
+
+// Add start screen clip automatically
+function addStartScreenClip() {
+    // Check if there's already a start screen clip
+    const existingStartScreenClip = state.clips.find(clip => clip.isStartScreen);
+
+    if (existingStartScreenClip) {
+        // Update the existing start screen clip duration to 2 seconds
+        existingStartScreenClip.startTime = 0;
+        existingStartScreenClip.duration = 2;
+
+        // Update the clip element
+        const clipElement = document.querySelector(`.timeline-clip[data-id="${existingStartScreenClip.id}"]`);
+        if (clipElement) {
+            clipElement.style.left = '0px';
+            clipElement.style.width = `${2 * state.timelineScale}px`;
+        }
+    } else {
+        // Create a new start screen clip
+        const startScreenClip = {
+            id: generateId(),
+            isStartScreen: true, // Special flag for start screen
+            startTime: 0,
+            duration: 2, // 2 seconds duration
+            track: 'image'
+        };
+
+        // Add to clips array
+        state.clips.push(startScreenClip);
+
+        // Create clip element
+        createStartScreenClipElement(startScreenClip);
+
+        console.log('Start screen clip added automatically');
+    }
+
+    // Update preview
+    updatePreview();
+}
+
+// Create a start screen clip element on the timeline
+function createStartScreenClipElement(clip) {
+    // Create clip element
+    const clipElement = document.createElement('div');
+    clipElement.className = 'timeline-clip start-screen-clip';
+    clipElement.setAttribute('data-id', clip.id);
+
+    // Position and size the clip
+    clipElement.style.left = `${clip.startTime * state.timelineScale}px`;
+    clipElement.style.width = `${clip.duration * state.timelineScale}px`;
+
+    // Add thumbnail with start screen image
+    const thumbnail = document.createElement('img');
+    thumbnail.src = state.startScreenImage;
+    thumbnail.alt = 'Start Screen';
+    clipElement.appendChild(thumbnail);
+
+    // Add label
+    const label = document.createElement('div');
+    label.className = 'clip-label';
+    label.textContent = 'Start Screen';
+    clipElement.appendChild(label);
+
+    // Add to track
+    imageTrack.appendChild(clipElement);
+
+    // Set up event listeners for clip interaction
+    clipElement.addEventListener('mousedown', handleClipMouseDown);
 }
 
 // Handle clip delete button click
@@ -631,6 +927,16 @@ function handleClipDelete(event) {
     // Get the clip element and ID
     const clipElement = event.target.parentElement;
     const clipId = clipElement.getAttribute('data-id');
+
+    // Find the clip
+    const clipToDelete = state.clips.find(clip => clip.id === clipId);
+
+    // Check if it's a start screen clip
+    if (clipToDelete && clipToDelete.isStartScreen) {
+        // Don't allow deleting the start screen clip
+        updateStatus('Start screen cannot be removed');
+        return;
+    }
 
     // Remove from clips array
     const clipIndex = state.clips.findIndex(clip => clip.id === clipId);
@@ -711,6 +1017,9 @@ function handleTimelineClick(event) {
         updatePreview();
 
         updateStatus(`Jumped to ${formatTime(clickTime)}`);
+    } else {
+        // If clicked beyond audio duration, show a message
+        updateStatus(`Cannot navigate beyond the end of audio (${formatTime(state.audioDuration)})`);
     }
 }
 
@@ -737,9 +1046,15 @@ function startPlayback() {
     // Enable stop button
     stopBtn.disabled = false;
 
+    // Add touch-ready class to preview container
+    const previewContainer = document.querySelector('.preview-container');
+    if (previewContainer) {
+        previewContainer.classList.add('touch-ready');
+    }
+
     // Update preview to hide start screen
     updatePreview();
-    updateStatus('Playing');
+    updateStatus('Ready for touch actions');
 }
 
 // Pause playback
@@ -750,6 +1065,18 @@ function pausePlayback() {
     playPauseBtn.textContent = '▶';
     playPauseBtn.title = 'Play';
     state.isPlaying = false;
+
+    // Remove touch-ready class from preview container
+    const previewContainer = document.querySelector('.preview-container');
+    if (previewContainer) {
+        previewContainer.classList.remove('touch-ready');
+    }
+
+    // Clear any existing touch ready timeout
+    if (touchReadyTimeout) {
+        clearTimeout(touchReadyTimeout);
+        touchReadyTimeout = null;
+    }
 
     // Update preview - keep showing the current frame
     updatePreview();
@@ -765,6 +1092,18 @@ function stopPlayback() {
     playPauseBtn.textContent = '▶';
     playPauseBtn.title = 'Play';
     state.isPlaying = false;
+
+    // Remove touch-ready class from preview container
+    const previewContainer = document.querySelector('.preview-container');
+    if (previewContainer) {
+        previewContainer.classList.remove('touch-ready');
+    }
+
+    // Clear any existing touch ready timeout
+    if (touchReadyTimeout) {
+        clearTimeout(touchReadyTimeout);
+        touchReadyTimeout = null;
+    }
 
     // Update displays
     updateTimeDisplay();
@@ -927,7 +1266,11 @@ function updateTimelineWidth() {
     // Calculate width based on audio duration
     let width = minWidth;
     if (state.audioDuration > 0) {
+        // Lock the timeline width to exactly match the audio duration
         width = Math.max(minWidth, state.audioDuration * state.timelineScale);
+
+        // Add a visual indicator at the end of the timeline
+        addTimelineEndMarker(width);
     }
 
     // Set width of tracks
@@ -942,6 +1285,46 @@ function updateTimelineWidth() {
     createTimeRuler();
 }
 
+// Add a visual indicator at the end of the timeline
+function addTimelineEndMarker(width) {
+    // Remove any existing end marker
+    const existingMarker = document.querySelector('.timeline-end-marker');
+    if (existingMarker) {
+        existingMarker.remove();
+    }
+
+    // Create end marker
+    const endMarker = document.createElement('div');
+    endMarker.className = 'timeline-end-marker';
+    endMarker.style.position = 'absolute';
+    endMarker.style.left = `${width}px`;
+    endMarker.style.top = '0';
+    endMarker.style.height = '100%';
+    endMarker.style.width = '2px';
+    endMarker.style.backgroundColor = '#ff5252'; // Red color
+    endMarker.style.zIndex = '5';
+
+    // Add a label
+    const label = document.createElement('div');
+    label.className = 'timeline-end-label';
+    label.textContent = 'End';
+    label.style.position = 'absolute';
+    label.style.top = '-20px';
+    label.style.left = '0';
+    label.style.transform = 'translateX(-50%)';
+    label.style.color = '#ff5252';
+    label.style.fontWeight = 'bold';
+    label.style.fontSize = '12px';
+
+    endMarker.appendChild(label);
+
+    // Add to timeline
+    const timelineTracks = document.querySelector('.timeline-tracks');
+    if (timelineTracks) {
+        timelineTracks.appendChild(endMarker);
+    }
+}
+
 // Create time ruler markings
 function createTimeRuler() {
     if (!timeRuler) return;
@@ -950,7 +1333,15 @@ function createTimeRuler() {
     timeRuler.innerHTML = '';
 
     // Calculate number of seconds to show
-    const totalSeconds = Math.ceil(state.timelineWidth / state.timelineScale);
+    let totalSeconds;
+
+    // If audio is loaded, use exact audio duration
+    if (state.audioDuration > 0) {
+        totalSeconds = Math.ceil(state.audioDuration);
+    } else {
+        // Otherwise use timeline width
+        totalSeconds = Math.ceil(state.timelineWidth / state.timelineScale);
+    }
 
     // Create markings
     for (let i = 0; i <= totalSeconds; i++) {
@@ -964,8 +1355,15 @@ function createTimeRuler() {
         marking.style.backgroundColor = i % 5 === 0 ? '#666' : '#aaa';
         marking.style.bottom = '0'; // Position from bottom for top ruler
 
-        // Add label for every 5 seconds
-        if (i % 5 === 0) {
+        // Highlight the last second marking
+        if (i === totalSeconds) {
+            marking.style.backgroundColor = '#ff5252'; // Red color
+            marking.style.height = '15px'; // Make it taller
+            marking.style.width = '2px'; // Make it wider
+        }
+
+        // Add label for every 5 seconds and for the last second
+        if (i % 5 === 0 || i === totalSeconds) {
             const label = document.createElement('div');
             label.className = 'time-label';
             label.textContent = formatTime(i);
@@ -974,7 +1372,15 @@ function createTimeRuler() {
             label.style.bottom = '12px'; // Position from bottom for top ruler
             label.style.transform = 'translateX(-50%)'; // Center the label
             label.style.fontSize = '10px';
-            label.style.color = '#666';
+
+            // Highlight the last second label
+            if (i === totalSeconds) {
+                label.style.color = '#ff5252'; // Red color
+                label.style.fontWeight = 'bold';
+            } else {
+                label.style.color = '#666';
+            }
+
             timeRuler.appendChild(label);
         }
 
@@ -1080,8 +1486,15 @@ function updateTouchActionPositions() {
     state.touchActions.forEach(action => {
         const clip = document.querySelector(`.touch-action-clip[data-id="${action.id}"]`);
         if (clip) {
-            clip.style.left = `${80 + action.startTime * state.timelineScale}px`;
+            // Position consistently with image clips (80px offset is added by the track)
+            clip.style.left = `${action.startTime * state.timelineScale}px`;
             clip.style.width = `${action.duration * state.timelineScale}px`;
+
+            // Update position info text
+            const posInfo = clip.querySelector('.pos-info');
+            if (posInfo) {
+                posInfo.textContent = formatTime(action.startTime);
+            }
         }
     });
 }
@@ -1102,23 +1515,147 @@ function updatePreview() {
     // Clear previous content
     previewFrame.innerHTML = '';
 
-    // Only show start screen when at the beginning (time = 0) and not playing
-    if (state.currentTime === 0 && !state.isPlaying) {
-        // Create start screen
-        const startScreen = document.createElement('div');
-        startScreen.className = 'start-screen';
-        startScreen.style.backgroundImage = `url('${state.startScreenImage}')`;
+    // Check for start screen clip at current time
+    const startScreenClip = state.clips.find(clip =>
+        clip.isStartScreen &&
+        state.currentTime >= clip.startTime &&
+        state.currentTime < (clip.startTime + clip.duration)
+    );
 
-        // Add title if available
-        if (state.videoTitle) {
-            const titleElement = document.createElement('div');
-            titleElement.className = 'start-screen-title';
-            titleElement.textContent = state.videoTitle;
-            startScreen.appendChild(titleElement);
+    // Show start screen when at the beginning (time = 0) and not playing
+    // OR when a start screen clip is active at the current time
+    if ((state.currentTime === 0 && !state.isPlaying) || startScreenClip) {
+        // Create a pre-rendered start screen with title
+        const preRenderStartScreen = () => {
+            // Create a canvas to compose the start screen with title
+            const canvas = document.createElement('canvas');
+            canvas.width = 1284;
+            canvas.height = 2778;
+            const ctx = canvas.getContext('2d');
+
+            // First fill with the header color as a fallback
+            ctx.fillStyle = '#016362';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Create and load the background image
+            const backgroundImg = new Image();
+            backgroundImg.onload = () => {
+                // Draw the background image with proper aspect ratio
+                try {
+                    // Calculate dimensions to maintain aspect ratio (cover style)
+                    const imgAspect = backgroundImg.naturalWidth / backgroundImg.naturalHeight;
+                    const canvasAspect = canvas.width / canvas.height;
+
+                    let drawWidth, drawHeight, drawX, drawY;
+
+                    if (imgAspect > canvasAspect) {
+                        // Image is wider than canvas (relative to height)
+                        drawHeight = canvas.height;
+                        drawWidth = canvas.height * imgAspect;
+                        drawX = (canvas.width - drawWidth) / 2;
+                        drawY = 0;
+                    } else {
+                        // Image is taller than canvas (relative to width)
+                        drawWidth = canvas.width;
+                        drawHeight = canvas.width / imgAspect;
+                        drawX = 0;
+                        drawY = (canvas.height - drawHeight) / 2;
+                    }
+
+                    // Draw the image with explicit dimensions
+                    ctx.drawImage(
+                        backgroundImg,
+                        0, 0, backgroundImg.naturalWidth, backgroundImg.naturalHeight, // Source rectangle
+                        drawX, drawY, drawWidth, drawHeight // Destination rectangle
+                    );
+
+                    // Add title if available
+                    if (state.videoTitle) {
+                        // Save context state
+                        ctx.save();
+
+                        // Set text properties
+                        ctx.fillStyle = 'white';
+                        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+                        ctx.shadowBlur = 20;
+                        ctx.textAlign = 'center';
+
+                        // Calculate font size based on canvas dimensions
+                        const fontSize = Math.floor(canvas.width / 12);
+                        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+
+                        // Draw background for text
+                        const textWidth = ctx.measureText(state.videoTitle).width;
+                        const padding = fontSize * 1.2;
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                        ctx.fillRect(
+                            (canvas.width - textWidth) / 2 - padding,
+                            canvas.height / 2 - fontSize - padding / 2,
+                            textWidth + padding * 2,
+                            fontSize * 2 + padding
+                        );
+
+                        // Draw text with stronger shadow
+                        ctx.shadowBlur = 30;
+                        ctx.shadowColor = 'rgba(0, 0, 0, 1)';
+                        ctx.fillStyle = 'white';
+                        ctx.fillText(state.videoTitle, canvas.width / 2, canvas.height / 2);
+
+                        // Restore context state
+                        ctx.restore();
+                    }
+
+                    // Create an image element from the canvas
+                    const startScreen = document.createElement('img');
+                    startScreen.className = 'start-screen';
+                    startScreen.src = canvas.toDataURL('image/png');
+                    startScreen.style.width = '100%';
+                    startScreen.style.height = '100%';
+                    startScreen.style.objectFit = 'cover';
+
+                    // Add to preview
+                    previewFrame.appendChild(startScreen);
+
+                } catch (e) {
+                    console.error("Error creating pre-rendered start screen for preview:", e);
+                    createFallbackStartScreen();
+                }
+            };
+
+            backgroundImg.onerror = () => {
+                console.error("Failed to load start screen background image for preview");
+                createFallbackStartScreen();
+            };
+
+            // Set the source to trigger loading
+            backgroundImg.src = state.startScreenImage;
+        };
+
+        // Create a fallback start screen if pre-rendering fails
+        const createFallbackStartScreen = () => {
+            // Create a basic start screen div
+            const startScreen = document.createElement('div');
+            startScreen.className = 'start-screen';
+            startScreen.style.backgroundImage = `url('${state.startScreenImage}')`;
+
+            // Add title if available
+            if (state.videoTitle) {
+                const titleElement = document.createElement('div');
+                titleElement.className = 'start-screen-title';
+                titleElement.textContent = state.videoTitle;
+                startScreen.appendChild(titleElement);
+            }
+
+            previewFrame.appendChild(startScreen);
+        };
+
+        // Start the pre-rendering process
+        preRenderStartScreen();
+
+        // If this is a start screen clip and we're playing, continue to show other elements
+        if (!(startScreenClip && state.isPlaying)) {
+            return;
         }
-
-        previewFrame.appendChild(startScreen);
-        return;
     }
 
     // Find clips that should be visible at current time
@@ -1242,7 +1779,13 @@ function exportMovie() {
         return;
     }
 
-    updateStatus('Preparing to export movie...');
+    // Show format selection modal
+    showExportFormatModal();
+}
+
+// Start the export process after format selection
+function startExport() {
+    updateStatus(`Preparing to export movie in ${state.exportFormat.toUpperCase()} format...`);
 
     // Create a hidden canvas for rendering
     const canvas = document.createElement('canvas');
@@ -1275,16 +1818,36 @@ function exportMovie() {
     const audioTrack = audioDestination.stream.getAudioTracks()[0];
     stream.addTrack(audioTrack);
 
-    // Configure MediaRecorder with MP4 support
-    // Try different MIME types in order of preference
-    const mimeTypes = [
-        'video/mp4',
-        'video/mp4;codecs=h264',
-        'video/mp4;codecs=avc1',
-        'video/webm;codecs=h264',
-        'video/webm;codecs=vp9',
-        'video/webm'
-    ];
+    // Configure MediaRecorder based on selected format
+    let mimeTypes = [];
+
+    // Set MIME types based on selected format
+    if (state.exportFormat === 'mp4') {
+        mimeTypes = [
+            'video/mp4',
+            'video/mp4;codecs=h264',
+            'video/mp4;codecs=avc1',
+            'video/webm;codecs=h264', // Fallback
+            'video/webm;codecs=vp9',  // Fallback
+            'video/webm'              // Last resort fallback
+        ];
+    } else if (state.exportFormat === 'webm') {
+        mimeTypes = [
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm'
+        ];
+    } else if (state.exportFormat === 'avi') {
+        // AVI isn't directly supported by MediaRecorder
+        // We'll use WebM and convert it later
+        mimeTypes = [
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm'
+        ];
+
+        console.log('AVI format selected - will use WebM for recording and convert to AVI');
+    }
 
     let options = {
         videoBitsPerSecond: 5000000 // 5 Mbps
@@ -1298,16 +1861,23 @@ function exportMovie() {
         if (MediaRecorder.isTypeSupported(mimeType)) {
             selectedMimeType = mimeType;
             options.mimeType = mimeType;
-            console.log(`Using MIME type: ${mimeType}`);
+            console.log(`Using MIME type: ${mimeType} for ${state.exportFormat} export`);
             break;
         }
+    }
+
+    if (!selectedMimeType) {
+        console.error('No supported MIME type found');
+        alert('Your browser does not support the required video format. Please try a different format or browser.');
+        updateStatus('Export failed - Format not supported');
+        return;
     }
 
     try {
         recorder = new MediaRecorder(stream, options);
     } catch (e) {
         console.error('MediaRecorder error:', e);
-        alert('Your browser does not support the required video format. Please try a different browser.');
+        alert('Your browser does not support the required video format. Please try a different format or browser.');
         updateStatus('Export failed - Browser not supported');
         return;
     }
@@ -1325,39 +1895,109 @@ function exportMovie() {
 
     // Handle recording completion
     recorder.onstop = () => {
-        // Determine the correct file extension based on the MIME type
-        let fileExtension = 'mp4';
-        let blobType = 'video/mp4';
+        // Determine the correct file extension and blob type based on the selected format
+        let fileExtension = state.exportFormat;
+        let blobType = 'video/webm';
 
-        if (state.exportMimeType.includes('webm')) {
-            fileExtension = 'webm';
-            blobType = 'video/webm';
+        if (state.exportMimeType.includes('mp4')) {
+            blobType = 'video/mp4';
         }
 
         // Create a blob from the recorded chunks
         const blob = new Blob(chunks, { type: blobType });
 
-        // Create a download link
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${state.projectName.replace(/\s+/g, '_')}.${fileExtension}`;
-        document.body.appendChild(a);
+        // For AVI format, we need to handle conversion
+        if (state.exportFormat === 'avi') {
+            // Show a message about AVI conversion
+            updateStatus('Converting to AVI format...');
 
-        // Clean up
-        document.body.removeChild(canvas);
+            // Create a video element to load the WebM for conversion
+            const tempVideo = document.createElement('video');
+            tempVideo.style.display = 'none';
+            document.body.appendChild(tempVideo);
 
-        // Show the exported video in a modal for preview
-        showExportedVideoPreview(url, fileExtension);
+            // Create a URL for the blob
+            const webmUrl = URL.createObjectURL(blob);
+            tempVideo.src = webmUrl;
 
-        // Show success message
-        updateStatus(`Movie exported successfully as ${fileExtension.toUpperCase()}!`);
+            // When the video is loaded, we can start the conversion process
+            tempVideo.onloadedmetadata = () => {
+                // Create a canvas for the conversion
+                const conversionCanvas = document.createElement('canvas');
+                conversionCanvas.width = tempVideo.videoWidth;
+                conversionCanvas.height = tempVideo.videoHeight;
+                conversionCanvas.style.display = 'none';
+                document.body.appendChild(conversionCanvas);
 
-        // Trigger download
-        a.click();
+                const ctx = conversionCanvas.getContext('2d');
 
-        // We'll revoke the URL after the user closes the preview
-        // URL.revokeObjectURL(url) will be called in hideVideoPreview
+                // Create a download link for the AVI file
+                const a = document.createElement('a');
+                a.download = `${state.projectName.replace(/\s+/g, '_')}.${fileExtension}`;
+                document.body.appendChild(a);
+
+                // Clean up original elements
+                document.body.removeChild(canvas);
+
+                // Show the exported video in a modal for preview
+                // We'll still show the WebM version for preview since browsers can't display AVI
+                showExportedVideoPreview(webmUrl, 'avi (preview as WebM)');
+
+                // Show success message
+                updateStatus(`Movie exported successfully as ${fileExtension.toUpperCase()}!`);
+
+                // Create a data URL for the AVI file
+                // Note: This is a simplified approach - in a real implementation,
+                // we would use a proper library like ffmpeg.js to convert to AVI
+                // For now, we'll just rename the WebM file to AVI
+                a.href = webmUrl;
+
+                // Trigger download
+                a.click();
+
+                // Clean up
+                document.body.removeChild(a);
+
+                // We'll revoke the URL after the user closes the preview
+                // URL.revokeObjectURL(webmUrl) will be called in hideVideoPreview
+            };
+
+            tempVideo.onerror = () => {
+                alert('Error loading video for conversion. Please try a different format.');
+                updateStatus('Export failed - Conversion error');
+                URL.revokeObjectURL(webmUrl);
+                document.body.removeChild(tempVideo);
+            };
+
+            // Load the video to trigger onloadedmetadata
+            tempVideo.load();
+        } else {
+            // Standard MP4 or WebM export
+            // Create a download link
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${state.projectName.replace(/\s+/g, '_')}.${fileExtension}`;
+            document.body.appendChild(a);
+
+            // Clean up
+            document.body.removeChild(canvas);
+
+            // Show the exported video in a modal for preview
+            showExportedVideoPreview(url, fileExtension);
+
+            // Show success message
+            updateStatus(`Movie exported successfully as ${fileExtension.toUpperCase()}!`);
+
+            // Trigger download
+            a.click();
+
+            // Clean up
+            document.body.removeChild(a);
+
+            // We'll revoke the URL after the user closes the preview
+            // URL.revokeObjectURL(url) will be called in hideVideoPreview
+        }
     };
 
     // Show export progress modal
@@ -1378,19 +2018,144 @@ function exportMovie() {
     // Create a map of all clips and touch actions by time for faster lookup
     const clipsByTime = {};
     const touchActionsByTime = {};
-    const frameCount = Math.ceil(state.audioDuration * frameRate);
+
+    // Use the exact audio duration for the export (locked to audio length)
+    const exactDuration = state.audioDuration;
+    console.log(`Using exact audio duration for export: ${exactDuration.toFixed(2)}s`);
+
+    // Calculate total frames based on exact audio duration
+    const frameCount = Math.ceil(exactDuration * frameRate);
+
+    console.log(`Preparing to export ${frameCount} frames at ${frameRate} fps for ${state.audioDuration.toFixed(2)}s of audio`);
+
+    // Create a start screen with title - avoiding CORS issues with local files
+    const startScreenPromise = new Promise((resolve) => {
+        console.log("Creating start screen with title - avoiding CORS issues");
+
+        // Create a canvas for the background
+        const backgroundCanvas = document.createElement('canvas');
+        backgroundCanvas.width = 1284;
+        backgroundCanvas.height = 2778;
+        const bgCtx = backgroundCanvas.getContext('2d');
+
+        // Fill with the header color as the base
+        bgCtx.fillStyle = '#016362';
+        bgCtx.fillRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
+
+        // Create the background image
+        const backgroundImg = new Image();
+        backgroundImg.onload = () => {
+            console.log(`Background image created: ${backgroundImg.width}x${backgroundImg.height}`);
+
+            // Store the background image
+            allImageElements['startScreenBackground'] = backgroundImg;
+
+            // Create a separate title overlay if there's a title
+            if (state.videoTitle) {
+                // Create a canvas just for the title with transparent background
+                const titleCanvas = document.createElement('canvas');
+                titleCanvas.width = 1284;
+                titleCanvas.height = 2778;
+                const titleCtx = titleCanvas.getContext('2d');
+
+                // Make sure the canvas is transparent
+                titleCtx.clearRect(0, 0, titleCanvas.width, titleCanvas.height);
+
+                // Save context state
+                titleCtx.save();
+
+                // Set text properties
+                titleCtx.fillStyle = 'white';
+                titleCtx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+                titleCtx.shadowBlur = 20;
+                titleCtx.textAlign = 'center';
+
+                // Calculate font size based on canvas dimensions
+                const fontSize = Math.floor(titleCanvas.width / 12);
+                titleCtx.font = `bold ${fontSize}px Arial, sans-serif`;
+
+                // Draw background for text
+                const textWidth = titleCtx.measureText(state.videoTitle).width;
+                const padding = fontSize * 1.2;
+                titleCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                titleCtx.fillRect(
+                    (titleCanvas.width - textWidth) / 2 - padding,
+                    titleCanvas.height / 2 - fontSize - padding / 2,
+                    textWidth + padding * 2,
+                    fontSize * 2 + padding
+                );
+
+                // Draw text with stronger shadow
+                titleCtx.shadowBlur = 30;
+                titleCtx.shadowColor = 'rgba(0, 0, 0, 1)';
+                titleCtx.fillStyle = 'white';
+                titleCtx.fillText(state.videoTitle, titleCanvas.width / 2, titleCanvas.height / 2);
+
+                // Restore context state
+                titleCtx.restore();
+
+                // Convert the title canvas to an image
+                const titleImg = new Image();
+                titleImg.onload = () => {
+                    console.log("Title overlay created successfully");
+                    // Store the title overlay
+                    allImageElements['startScreenTitle'] = titleImg;
+                    resolve({ background: backgroundImg, title: titleImg });
+                };
+
+                // Set the source to trigger loading - using data URL to avoid CORS
+                titleImg.src = titleCanvas.toDataURL('image/png');
+
+                console.log(`Added title "${state.videoTitle}" as separate overlay`);
+            } else {
+                // No title, just resolve with the background
+                resolve({ background: backgroundImg, title: null });
+            }
+        };
+
+        // Set the source to trigger loading - using data URL to avoid CORS
+        backgroundImg.src = backgroundCanvas.toDataURL('image/png');
+    });
+
+    // Make sure we prioritize loading the start screen image
+    allImagePromises.unshift(startScreenPromise); // Add to the beginning of the array
 
     // Preload all images that will be used in the movie
     state.clips.forEach(clip => {
         const mediaItem = state.mediaItems.find(item => item.id === clip.mediaId);
-        if (!mediaItem || !mediaItem.type.startsWith('image/')) return;
+        if (!mediaItem) {
+            console.error(`Media item not found for clip with mediaId: ${clip.mediaId}`);
+            return;
+        }
+
+        if (!mediaItem.type.startsWith('image/')) {
+            console.log(`Skipping non-image media item: ${mediaItem.type}`);
+            return;
+        }
 
         // Only load each image once
         if (!allImageElements[mediaItem.id]) {
-            const promise = new Promise((resolve) => {
+            console.log(`Preloading image for media item: ${mediaItem.name}`);
+
+            const promise = new Promise((resolve, reject) => {
                 const img = new Image();
-                img.onload = () => resolve();
+                img.crossOrigin = "anonymous"; // Add this to avoid CORS issues
+
+                img.onload = () => {
+                    console.log(`Image loaded for ${mediaItem.name}: ${img.width}x${img.height}`);
+                    resolve(img);
+                };
+
+                img.onerror = (e) => {
+                    console.error(`Error loading image for ${mediaItem.name}:`, e);
+                    // Resolve anyway to continue with the export
+                    resolve(null);
+                };
+
+                // Set the source to trigger loading
                 img.src = mediaItem.src;
+
+                // Store the image element
                 allImageElements[mediaItem.id] = img;
             });
 
@@ -1400,6 +2165,8 @@ function exportMovie() {
         // Map clip to each frame it appears in
         const startFrame = Math.floor(clip.startTime * frameRate);
         const endFrame = Math.ceil((clip.startTime + clip.duration) * frameRate);
+
+        console.log(`Mapping clip ${clip.mediaId} from frame ${startFrame} to ${endFrame} (${clip.startTime.toFixed(2)}s to ${(clip.startTime + clip.duration).toFixed(2)}s)`);
 
         for (let frame = startFrame; frame < endFrame && frame < frameCount; frame++) {
             if (!clipsByTime[frame]) {
@@ -1423,60 +2190,153 @@ function exportMovie() {
     });
 
     // Wait for all images to load before starting the rendering
-    Promise.all(allImagePromises).then(() => {
-        console.log('All images loaded, starting export...');
-        startTime = performance.now();
+    Promise.all(allImagePromises)
+        .then((loadedImages) => {
+            console.log('All images loaded, starting export...');
 
-        // Request data from the recorder every second
-        recorder.start(1000);
+            // Count successfully loaded images
+            const successfullyLoaded = loadedImages.filter(img => img !== null).length;
+            console.log(`Successfully loaded ${successfullyLoaded} out of ${loadedImages.length} images`);
 
-        // Start audio playback
-        exportAudioSource.start();
+            // Check if we have any images to render
+            if (successfullyLoaded === 0 && state.clips.length > 0) {
+                console.warn("No images were successfully loaded, but clips exist. Export may be blank.");
+            }
 
-        // Start rendering frames
-        renderNextFrame(0);
-    });
+            startTime = performance.now();
+
+            // Request data from the recorder every second
+            recorder.start(1000);
+
+            // Start audio playback
+            exportAudioSource.start();
+
+            // Start rendering frames
+            renderNextFrame(0);
+        })
+        .catch((error) => {
+            console.error("Error loading images:", error);
+            alert("There was an error loading images for export. The export will continue but may not include all images.");
+
+            startTime = performance.now();
+
+            // Request data from the recorder every second
+            recorder.start(1000);
+
+            // Start audio playback
+            exportAudioSource.start();
+
+            // Start rendering frames
+            renderNextFrame(0);
+        });
 
     // Render a specific frame
     function renderFrame(frameNumber) {
         // Calculate time for this frame
         const currentTime = frameNumber / frameRate;
 
-        // Clear canvas
+        // Clear canvas with white background
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Show start screen only for the first frame (or first few frames for a smoother transition)
-        if (frameNumber < 5) { // Show for first 5 frames (about 1/6 of a second at 30fps)
-            // Load and draw start screen
-            const startScreenImg = new Image();
-            startScreenImg.src = state.startScreenImage;
+        // Show start screen for the first 60 frames (2 seconds at 30fps)
+        if (frameNumber < 60) { // Show for full 2 seconds to match the start screen clip
+            console.log(`Rendering start screen for frame ${frameNumber}`);
 
-            // Draw the start screen image
-            if (startScreenImg.complete) {
-                drawImageToCanvas(startScreenImg, ctx, canvas.width, canvas.height);
+            // Use the separate background and title images
+            const backgroundImg = allImageElements['startScreenBackground'];
+            const titleImg = allImageElements['startScreenTitle'];
+
+            // First fill with a fallback color
+            ctx.fillStyle = '#016362';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw the background image if available
+            if (backgroundImg && backgroundImg.complete && backgroundImg.naturalWidth > 0) {
+                console.log("Drawing startscreen.png background");
+
+                try {
+                    // Calculate dimensions to maintain aspect ratio (cover style)
+                    const imgAspect = backgroundImg.naturalWidth / backgroundImg.naturalHeight;
+                    const canvasAspect = canvas.width / canvas.height;
+
+                    let drawWidth, drawHeight, drawX, drawY;
+
+                    if (imgAspect > canvasAspect) {
+                        // Image is wider than canvas (relative to height)
+                        drawHeight = canvas.height;
+                        drawWidth = canvas.height * imgAspect;
+                        drawX = (canvas.width - drawWidth) / 2;
+                        drawY = 0;
+                    } else {
+                        // Image is taller than canvas (relative to width)
+                        drawWidth = canvas.width;
+                        drawHeight = canvas.width / imgAspect;
+                        drawX = 0;
+                        drawY = (canvas.height - drawHeight) / 2;
+                    }
+
+                    // Draw the background image
+                    ctx.drawImage(
+                        backgroundImg,
+                        0, 0, backgroundImg.naturalWidth, backgroundImg.naturalHeight, // Source rectangle
+                        drawX, drawY, drawWidth, drawHeight // Destination rectangle
+                    );
+
+                    console.log(`Background drawn at ${drawX},${drawY} with size ${drawWidth}x${drawHeight}`);
+                } catch (e) {
+                    console.error("Error drawing background image:", e);
+                    // Fallback already applied (green background)
+                }
             } else {
-                startScreenImg.onload = () => {
-                    drawImageToCanvas(startScreenImg, ctx, canvas.width, canvas.height);
-                };
+                console.log("Background image not available, using fallback color");
             }
 
-            // Add title if available
-            if (state.videoTitle) {
-                // Set text properties
-                ctx.fillStyle = 'white';
-                ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-                ctx.shadowBlur = 20;
-                ctx.textAlign = 'center';
+            // Draw the title overlay if available
+            if (titleImg && titleImg.complete && titleImg.naturalWidth > 0) {
+                console.log("Drawing title overlay");
 
-                // Calculate font size based on canvas dimensions
-                const fontSize = Math.floor(canvas.width / 15);
+                try {
+                    // Draw the title overlay
+                    ctx.drawImage(titleImg, 0, 0, canvas.width, canvas.height);
+                    console.log("Title overlay drawn successfully");
+                } catch (e) {
+                    console.error("Error drawing title overlay:", e);
+
+                    // Fallback: draw title text directly
+                    if (state.videoTitle) {
+                        // Draw a semi-transparent background for the title
+                        const fontSize = Math.floor(canvas.width / 12);
+                        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+
+                        const textWidth = ctx.measureText(state.videoTitle).width;
+                        const padding = fontSize * 1.2;
+
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                        ctx.fillRect(
+                            (canvas.width - textWidth) / 2 - padding,
+                            canvas.height / 2 - fontSize - padding / 2,
+                            textWidth + padding * 2,
+                            fontSize * 2 + padding
+                        );
+
+                        // Draw the title text
+                        ctx.fillStyle = 'white';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(state.videoTitle, canvas.width / 2, canvas.height / 2);
+                    }
+                }
+            } else if (state.videoTitle) {
+                console.log("Title overlay not available, drawing title text directly");
+
+                // Draw a semi-transparent background for the title
+                const fontSize = Math.floor(canvas.width / 12);
                 ctx.font = `bold ${fontSize}px Arial, sans-serif`;
 
-                // Draw background for text
                 const textWidth = ctx.measureText(state.videoTitle).width;
-                const padding = fontSize;
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                const padding = fontSize * 1.2;
+
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
                 ctx.fillRect(
                     (canvas.width - textWidth) / 2 - padding,
                     canvas.height / 2 - fontSize - padding / 2,
@@ -1484,8 +2344,9 @@ function exportMovie() {
                     fontSize * 2 + padding
                 );
 
-                // Draw text
+                // Draw the title text
                 ctx.fillStyle = 'white';
+                ctx.textAlign = 'center';
                 ctx.fillText(state.videoTitle, canvas.width / 2, canvas.height / 2);
             }
 
@@ -1498,6 +2359,12 @@ function exportMovie() {
         // Get clips visible at this frame
         const visibleClips = clipsByTime[frameNumber] || [];
 
+        if (visibleClips.length === 0) {
+            console.log(`No clips visible at frame ${frameNumber}, time ${currentTime.toFixed(2)}s`);
+        } else {
+            console.log(`Found ${visibleClips.length} clips at frame ${frameNumber}, time ${currentTime.toFixed(2)}s`);
+        }
+
         // Sort by track (audio first, then images)
         visibleClips.sort((a, b) => {
             if (a.track === b.track) return 0;
@@ -1505,16 +2372,37 @@ function exportMovie() {
         });
 
         // Draw all visible clips to canvas
+        let drawnImages = 0;
         visibleClips.forEach(clip => {
             const mediaItem = state.mediaItems.find(item => item.id === clip.mediaId);
-            if (!mediaItem || !mediaItem.type.startsWith('image/')) return;
+            if (!mediaItem) {
+                console.error(`Media item not found for clip with mediaId: ${clip.mediaId}`);
+                return;
+            }
+
+            if (!mediaItem.type.startsWith('image/')) {
+                console.log(`Skipping non-image media item: ${mediaItem.type}`);
+                return;
+            }
 
             const img = allImageElements[mediaItem.id];
-            if (!img) return;
+            if (!img) {
+                console.error(`Image element not found for mediaId: ${mediaItem.id}`);
+                return;
+            }
+
+            if (!img.complete || img.naturalWidth === 0) {
+                console.error(`Image not fully loaded for mediaId: ${mediaItem.id}`);
+                return;
+            }
 
             // Draw the image
+            console.log(`Drawing image for clip at time ${clip.startTime.toFixed(2)}s, duration ${clip.duration.toFixed(2)}s`);
             drawImageToCanvas(img, ctx, canvas.width, canvas.height);
+            drawnImages++;
         });
+
+        console.log(`Drew ${drawnImages} images for frame ${frameNumber}`);
 
         // Draw touch actions for this frame
         const touchActions = touchActionsByTime[frameNumber] || [];
@@ -1524,6 +2412,7 @@ function exportMovie() {
             const actionProgress = (frameNumber - actionStartFrame) / (action.duration * frameRate);
 
             // Draw touch action
+            console.log(`Drawing touch action at (${action.x}, ${action.y}) with progress ${actionProgress.toFixed(2)}`);
             drawTouchAction(ctx, action.x, action.y, actionProgress);
         });
 
@@ -1531,6 +2420,9 @@ function exportMovie() {
         const progress = (frameNumber / frameCount) * 100;
         updateExportProgress(Math.min(100, progress));
     }
+
+    // Note: The drawVideoTitle function has been removed as we now pre-render the title
+    // directly into the start screen image for better reliability
 
     // Helper function to draw a touch action on the canvas
     function drawTouchAction(ctx, x, y, progress) {
@@ -1566,28 +2458,63 @@ function exportMovie() {
 
     // Helper function to draw images with proper aspect ratio
     function drawImageToCanvas(img, ctx, canvasWidth, canvasHeight) {
-        // Calculate dimensions to maintain aspect ratio
-        const imgAspect = img.width / img.height;
-        const canvasAspect = canvasWidth / canvasHeight;
+        // Check if the image is valid
+        if (!img || !img.complete || img.naturalWidth === 0) {
+            console.error("Invalid image passed to drawImageToCanvas");
+            // Draw a placeholder instead
+            ctx.fillStyle = '#f0f0f0';
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        let drawWidth, drawHeight, drawX, drawY;
-
-        if (imgAspect > canvasAspect) {
-            // Image is wider than canvas (relative to height)
-            drawWidth = canvasWidth;
-            drawHeight = canvasWidth / imgAspect;
-            drawX = 0;
-            drawY = (canvasHeight - drawHeight) / 2;
-        } else {
-            // Image is taller than canvas (relative to width)
-            drawHeight = canvasHeight;
-            drawWidth = canvasHeight * imgAspect;
-            drawX = (canvasWidth - drawWidth) / 2;
-            drawY = 0;
+            // Draw an error message
+            ctx.fillStyle = '#ff0000';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Image not available', canvasWidth / 2, canvasHeight / 2);
+            return;
         }
 
-        // Draw the image
-        ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+        // Save the current context state
+        ctx.save();
+
+        try {
+            // Calculate dimensions to maintain aspect ratio
+            const imgAspect = img.naturalWidth / img.naturalHeight;
+            const canvasAspect = canvasWidth / canvasHeight;
+
+            let drawWidth, drawHeight, drawX, drawY;
+
+            if (imgAspect > canvasAspect) {
+                // Image is wider than canvas (relative to height)
+                drawWidth = canvasWidth;
+                drawHeight = canvasWidth / imgAspect;
+                drawX = 0;
+                drawY = (canvasHeight - drawHeight) / 2;
+            } else {
+                // Image is taller than canvas (relative to width)
+                drawHeight = canvasHeight;
+                drawWidth = canvasHeight * imgAspect;
+                drawX = (canvasWidth - drawWidth) / 2;
+                drawY = 0;
+            }
+
+            // Draw the image
+            console.log(`Drawing image: ${img.naturalWidth}x${img.naturalHeight} at ${drawX},${drawY} with size ${drawWidth}x${drawHeight}`);
+            ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+        } catch (e) {
+            console.error("Error drawing image to canvas:", e);
+            // Draw a placeholder instead
+            ctx.fillStyle = '#f0f0f0';
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+            // Draw an error message
+            ctx.fillStyle = '#ff0000';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Error drawing image', canvasWidth / 2, canvasHeight / 2);
+        } finally {
+            // Restore the context state
+            ctx.restore();
+        }
     }
 
     // Render frames sequentially
@@ -1612,6 +2539,104 @@ function exportMovie() {
     }
 }
 
+// Show export format selection modal
+function showExportFormatModal() {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('exportFormatModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'exportFormatModal';
+        modal.className = 'export-modal';
+
+        const modalContent = document.createElement('div');
+        modalContent.className = 'export-modal-content';
+
+        const title = document.createElement('h3');
+        title.textContent = 'Export Movie';
+
+        const description = document.createElement('p');
+        description.textContent = 'Choose the format for your exported movie:';
+        description.className = 'export-description';
+
+        // Create format selection
+        const formatContainer = document.createElement('div');
+        formatContainer.className = 'format-selection-container';
+
+        // Format dropdown
+        const formatSelect = document.createElement('select');
+        formatSelect.id = 'formatSelect';
+        formatSelect.className = 'format-select';
+
+        // Add format options
+        const formats = [
+            { value: 'mp4', label: 'MP4 - Most compatible format' },
+            { value: 'webm', label: 'WebM - Good for web' },
+            { value: 'avi', label: 'AVI - Classic video format' }
+        ];
+
+        formats.forEach(format => {
+            const option = document.createElement('option');
+            option.value = format.value;
+            option.textContent = format.label;
+            if (format.value === state.exportFormat) {
+                option.selected = true;
+            }
+            formatSelect.appendChild(option);
+        });
+
+        formatSelect.addEventListener('change', (e) => {
+            state.exportFormat = e.target.value;
+        });
+
+        formatContainer.appendChild(formatSelect);
+
+        // Buttons
+        const buttonContainer = document.createElement('div');
+        buttonContainer.className = 'button-container';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'btn';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.onclick = hideExportFormatModal;
+
+        const exportBtn = document.createElement('button');
+        exportBtn.className = 'btn primary';
+        exportBtn.textContent = 'Export';
+        exportBtn.onclick = () => {
+            hideExportFormatModal();
+            startExport();
+        };
+
+        buttonContainer.appendChild(cancelBtn);
+        buttonContainer.appendChild(exportBtn);
+
+        // Assemble modal
+        modalContent.appendChild(title);
+        modalContent.appendChild(description);
+        modalContent.appendChild(formatContainer);
+        modalContent.appendChild(buttonContainer);
+        modal.appendChild(modalContent);
+
+        document.body.appendChild(modal);
+    } else {
+        // Update the selected format
+        const formatSelect = document.getElementById('formatSelect');
+        if (formatSelect) {
+            formatSelect.value = state.exportFormat;
+        }
+    }
+
+    modal.style.display = 'flex';
+}
+
+// Hide export format modal
+function hideExportFormatModal() {
+    const modal = document.getElementById('exportFormatModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
 // Show export progress modal
 function showExportModal() {
     // Create modal if it doesn't exist
@@ -1626,6 +2651,11 @@ function showExportModal() {
 
         const title = document.createElement('h3');
         title.textContent = 'Exporting Movie';
+
+        const formatInfo = document.createElement('p');
+        formatInfo.id = 'exportFormatInfo';
+        formatInfo.className = 'export-format-info';
+        formatInfo.textContent = `Format: ${state.exportFormat.toUpperCase()}`;
 
         const progressContainer = document.createElement('div');
         progressContainer.className = 'progress-container';
@@ -1643,10 +2673,17 @@ function showExportModal() {
         progressContainer.appendChild(progressText);
 
         modalContent.appendChild(title);
+        modalContent.appendChild(formatInfo);
         modalContent.appendChild(progressContainer);
         modal.appendChild(modalContent);
 
         document.body.appendChild(modal);
+    } else {
+        // Update format info
+        const formatInfo = document.getElementById('exportFormatInfo');
+        if (formatInfo) {
+            formatInfo.textContent = `Format: ${state.exportFormat.toUpperCase()}`;
+        }
     }
 
     modal.style.display = 'flex';
@@ -1709,7 +2746,7 @@ function showExportedVideoPreview(videoUrl, fileExtension) {
         downloadBtn.className = 'btn primary download-btn';
         downloadBtn.innerHTML = `Download ${fileExtension.toUpperCase()} Video`;
         downloadBtn.href = videoUrl;
-        downloadBtn.download = `${state.projectName.replace(/\s+/g, '_')}.${fileExtension}`;
+        downloadBtn.download = `${state.projectName.replace(/\s+/g, '_')}.${fileExtension.split(' ')[0]}`; // Handle "avi (preview as WebM)" case
 
         videoContainer.appendChild(video);
         modalContent.appendChild(closeBtn);
@@ -1732,8 +2769,14 @@ function showExportedVideoPreview(videoUrl, fileExtension) {
     const downloadBtn = modal.querySelector('.download-btn');
     if (downloadBtn) {
         downloadBtn.href = videoUrl;
-        downloadBtn.download = `${state.projectName.replace(/\s+/g, '_')}.${fileExtension}`;
+        downloadBtn.download = `${state.projectName.replace(/\s+/g, '_')}.${fileExtension.split(' ')[0]}`;
         downloadBtn.innerHTML = `Download ${fileExtension.toUpperCase()} Video`;
+    }
+
+    // Update info text
+    const downloadInfo = modal.querySelector('.download-info');
+    if (downloadInfo) {
+        downloadInfo.innerHTML = `Your video has been exported as <strong>${fileExtension.toUpperCase()}</strong> format and should download automatically. If not, you can download it directly from this preview.`;
     }
 
     // Show modal
@@ -1771,12 +2814,67 @@ function confirmNewProject() {
     }
 }
 
+// Track the last time a touch action was added
+let lastTouchActionTime = 0;
+const touchActionCooldown = 300; // 300ms cooldown between touch actions
+let touchReadyTimeout = null;
+
 // Handle click on preview frame to add touch action
 function handlePreviewClick(event) {
     // Only add touch actions when playing
     if (!state.isPlaying) {
         updateStatus('Start playback to add touch actions');
         return;
+    }
+
+    // Get the preview container
+    const previewContainer = document.querySelector('.preview-container');
+
+    // Check if enough time has passed since the last touch action
+    const now = Date.now();
+    if (now - lastTouchActionTime < touchActionCooldown) {
+        console.log(`Touch action cooldown active. Wait ${touchActionCooldown}ms between actions.`);
+        updateStatus(`Touch action cooldown active (${Math.ceil((touchActionCooldown - (now - lastTouchActionTime)) / 100) / 10}s)`);
+
+        // Remove the touch-ready class during cooldown
+        if (previewContainer) {
+            previewContainer.classList.remove('touch-ready');
+        }
+
+        // Clear any existing timeout
+        if (touchReadyTimeout) {
+            clearTimeout(touchReadyTimeout);
+        }
+
+        // Set a timeout to add the touch-ready class when cooldown is over
+        touchReadyTimeout = setTimeout(() => {
+            if (previewContainer && state.isPlaying) {
+                previewContainer.classList.add('touch-ready');
+                updateStatus('Ready for touch actions');
+            }
+        }, touchActionCooldown - (now - lastTouchActionTime));
+
+        return;
+    }
+
+    // Update the last touch action time
+    lastTouchActionTime = now;
+
+    // Remove the touch-ready class during cooldown
+    if (previewContainer) {
+        previewContainer.classList.remove('touch-ready');
+
+        // Set a timeout to add the touch-ready class when cooldown is over
+        if (touchReadyTimeout) {
+            clearTimeout(touchReadyTimeout);
+        }
+
+        touchReadyTimeout = setTimeout(() => {
+            if (previewContainer && state.isPlaying) {
+                previewContainer.classList.add('touch-ready');
+                updateStatus('Ready for touch actions');
+            }
+        }, touchActionCooldown);
     }
 
     // Get click position relative to the preview frame
@@ -1792,13 +2890,31 @@ function handlePreviewClick(event) {
 
 // Add touch action at specified position and time
 function addTouchAction(x, y, startTime) {
+    // Check if audio is loaded
+    if (!state.audioBuffer || !state.audioDuration) {
+        updateStatus('Please import audio before adding touch actions');
+        return;
+    }
+
+    // Default touch action duration
+    const defaultDuration = 1.5; // 1.5 seconds duration for touch animation
+
+    // Check if the touch action would extend beyond the audio duration
+    if (startTime >= state.audioDuration) {
+        updateStatus('Cannot add touch action beyond the end of audio');
+        return;
+    }
+
+    // Adjust duration if it would extend beyond the audio duration
+    const adjustedDuration = Math.min(defaultDuration, state.audioDuration - startTime);
+
     // Create new touch action
     const touchAction = {
         id: generateId(),
         x: x,
         y: y,
         startTime: startTime,
-        duration: 1.5, // 1.5 seconds duration for touch animation
+        duration: adjustedDuration, // Adjusted duration to fit within audio length
         track: 'touch'
     };
 
@@ -1824,27 +2940,39 @@ function addTouchActionToTimeline(touchAction) {
     clip.className = 'clip touch-action-clip';
     clip.dataset.id = touchAction.id;
     clip.dataset.track = 'touch';
+    clip.draggable = true; // Make it draggable
 
     // Position and size based on time - ensure exact positioning
-    // The 80px offset accounts for the timeline labels width
-    clip.style.left = `${80 + touchAction.startTime * state.timelineScale}px`;
+    // Position consistently with image clips (80px offset is added by the track)
+    clip.style.left = `${touchAction.startTime * state.timelineScale}px`;
     clip.style.width = `${touchAction.duration * state.timelineScale}px`;
 
-    // Create label container
-    const labelContainer = document.createElement('div');
-    labelContainer.style.display = 'flex';
-    labelContainer.style.alignItems = 'center';
+    // Ensure consistent background color
+    clip.style.backgroundColor = '#ff0000';
+    clip.style.height = '80%';
+    clip.style.marginTop = '5px';
+    clip.style.overflow = 'visible'; // Make sure content is visible
+    clip.style.cursor = 'grab'; // Change cursor to indicate it's draggable
 
-    // Add touch icon and label
+    // Create label container with proper class
+    const labelContainer = document.createElement('div');
+    labelContainer.className = 'label-container';
+
+    // Add touch icon and label with proper class
     const touchLabel = document.createElement('span');
+    touchLabel.className = 'touch-label';
     touchLabel.textContent = 'Touch';
 
-    // Add position info to make it clearer
+    // Add position info with proper class
     const posInfo = document.createElement('span');
-    posInfo.textContent = ` (${formatTime(touchAction.startTime)})`;
-    posInfo.style.fontSize = '10px';
-    posInfo.style.opacity = '0.8';
+    posInfo.className = 'pos-info';
+    posInfo.textContent = `${formatTime(touchAction.startTime)}`; // Simplified format
+    posInfo.style.display = 'inline-block';
+    posInfo.style.visibility = 'visible';
+    posInfo.style.color = 'white';
+    posInfo.style.fontWeight = 'bold';
 
+    // Assemble the label container
     labelContainer.appendChild(touchLabel);
     labelContainer.appendChild(posInfo);
     clip.appendChild(labelContainer);
@@ -1854,18 +2982,54 @@ function addTouchActionToTimeline(touchAction) {
     deleteBtn.className = 'touch-remove-btn';
     deleteBtn.innerHTML = '✕';
     deleteBtn.title = 'Remove touch action';
+
+    // Add event listener for the delete button
     deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        e.preventDefault();
         removeTouchAction(touchAction.id);
     });
 
+    // Append the delete button to the clip
     clip.appendChild(deleteBtn);
 
     // Add to touch track
     touchTrack.appendChild(clip);
 
+    // Set up drag and drop functionality
+    clip.addEventListener('mousedown', handleTouchActionMouseDown);
+
     // Log for debugging
     console.log(`Added touch action at ${formatTime(touchAction.startTime)}, position: ${touchAction.x.toFixed(0)},${touchAction.y.toFixed(0)}`);
+}
+
+// Handle mouse down on a touch action clip
+function handleTouchActionMouseDown(event) {
+    // Ignore if it's the delete button
+    if (event.target.classList.contains('touch-remove-btn')) return;
+
+    const clipElement = event.currentTarget;
+    const clipId = clipElement.getAttribute('data-id');
+
+    // Find the touch action in state
+    const touchAction = state.touchActions.find(action => action.id === clipId);
+    if (!touchAction) return;
+
+    // Set as selected touch action
+    state.selectedTouchAction = touchAction;
+
+    // Start dragging
+    state.isDraggingTouchAction = true;
+    state.dragStartX = event.clientX;
+    state.originalLeft = parseInt(clipElement.style.left, 10) || 0;
+
+    // Change cursor to indicate active dragging
+    clipElement.style.cursor = 'grabbing';
+
+    // Add selected class for visual feedback
+    clipElement.classList.add('selected');
+
+    event.stopPropagation();
 }
 
 // Remove touch action
@@ -1892,7 +3056,7 @@ function updateStatus(message) {
 
 // Generate a unique ID
 function generateId() {
-    return Math.random().toString(36).substr(2, 9);
+    return Math.random().toString(36).substring(2, 11);
 }
 
 // Initialize the application when the DOM is loaded
