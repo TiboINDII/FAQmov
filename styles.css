@@ -1,0 +1,953 @@
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #333;
+    background-color: #f5f5f7;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* Header styles */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 25px;
+    background-color: #016362; /* New background color */
+    color: white;
+    border-bottom: 1px solid #015150;
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.2);
+    height: 70px;
+    position: relative;
+    z-index: 10; /* Ensure header is above other elements */
+}
+
+.logo {
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: white;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+    letter-spacing: 0.5px;
+    display: flex;
+    align-items: center;
+}
+
+.logo::before {
+    content: "🎬";
+    margin-right: 10px;
+    font-size: 1.8rem;
+}
+
+.toolbar {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    background-color: rgba(255, 255, 255, 0.1);
+    padding: 8px 15px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.title-input {
+    display: flex;
+    align-items: center;
+    margin-right: 15px;
+    background-color: rgba(255, 255, 255, 0.15); /* Semi-transparent white */
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.3); /* Subtle border */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15); /* Subtle shadow */
+}
+
+.title-input label {
+    margin-right: 8px;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    font-weight: bold;
+    color: white; /* White text for contrast on dark background */
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+}
+
+.title-input input {
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.4); /* Semi-transparent border */
+    border-radius: 4px;
+    font-size: 1rem; /* Slightly larger font */
+    width: 250px;
+    background-color: rgba(255, 255, 255, 0.9);
+    transition: all 0.2s ease;
+    color: #016362; /* Match header color for cohesion */
+}
+
+.title-input input:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4); /* White glow on focus */
+    border-color: white;
+    background-color: white;
+}
+
+/* Frame dimensions styling */
+.frame-dimensions {
+    display: flex;
+    align-items: center;
+    margin-right: 15px;
+    background-color: rgba(255, 255, 255, 0.15);
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.frame-dimensions label {
+    margin-right: 8px;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+}
+
+.dimension-controls {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.dimension-controls input {
+    width: 70px;
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 4px;
+    font-size: 0.9rem;
+    text-align: center;
+    background-color: rgba(255, 255, 255, 0.9);
+    color: #016362;
+}
+
+.dimension-controls input:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
+    border-color: white;
+    background-color: white;
+}
+
+.dimension-controls span {
+    font-size: 0.9rem;
+    color: white;
+    font-weight: bold;
+}
+
+.btn-small {
+    padding: 6px 10px;
+    font-size: 0.8rem;
+}
+
+/* Button styles */
+.btn {
+    padding: 8px 16px;
+    background-color: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: white;
+    font-weight: 500;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+}
+
+.btn:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+    transform: translateY(-1px);
+}
+
+.btn.primary {
+    background-color: #02a19f; /* Lighter shade of the header color */
+    color: white;
+    border-color: #02b5b3;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.btn.primary:hover {
+    background-color: #03b8b6;
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.25);
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.control-btn {
+    width: 60px;
+}
+
+/* Main layout */
+.main-layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    height: calc(100vh - 90px); /* Subtract header and status bar height */
+}
+
+/* Editor panels (left side) */
+.editor-panels {
+    flex: 3; /* 75% of the space (3 parts out of 4) */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background-color: #f5f5f7;
+    min-width: 300px;
+    /* Ensure children use the full height */
+    height: 100%;
+}
+
+/* Media panel */
+.media-panel {
+    width: 100%;
+    background-color: #fff;
+    border-right: 1px solid #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 30%; /* 30% of the editor panel height */
+    min-height: 120px;
+}
+
+.panel-header {
+    padding: 15px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.panel-header h2 {
+    font-size: 1.1rem;
+    margin-bottom: 10px;
+}
+
+.import-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.media-container {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    overflow-y: auto;
+    padding: 15px;
+}
+
+.empty-state {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    color: #999;
+    text-align: center;
+    padding: 20px;
+}
+
+/* Preview panel */
+.preview-panel {
+    flex: 1; /* 25% of the space (1 part out of 4) */
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: stretch;
+    background-color: #000;
+    overflow: hidden;
+    position: relative;
+    min-width: 300px;
+    padding: 0;
+    margin: 0;
+    height: 100%;
+}
+
+.preview-container {
+    position: relative;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+.preview-frame {
+    width: 1284px;
+    height: 2778px;
+    /* Scale to fit the container while maintaining aspect ratio */
+    transform-origin: top left;
+    /* Scale dynamically calculated in JavaScript */
+    transform: scale(0.25);
+    background-color: white;
+    position: absolute;
+    top: 0;
+    left: 0;
+    overflow: hidden;
+    /* Remove border and shadow for maximum visibility */
+    border: none;
+    /* Add subtle grid background to help with positioning */
+    background-image:
+        linear-gradient(rgba(200, 200, 200, 0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(200, 200, 200, 0.1) 1px, transparent 1px);
+    background-size: 100px 100px;
+}
+
+.empty-preview {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    color: #999;
+    text-align: center;
+    font-size: 5rem;
+}
+
+/* Start screen styles */
+.start-screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10; /* Ensure it's above other content */
+    transition: opacity 0.5s ease; /* Smooth transition when hiding */
+}
+
+.start-screen-title {
+    color: white;
+    font-size: 120px;
+    font-weight: bold;
+    text-align: center;
+    text-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+    padding: 30px;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-radius: 20px;
+    max-width: 80%;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+}
+
+.preview-label {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: white;
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: bold;
+    z-index: 5;
+    opacity: 0.7;
+}
+
+.dimension-marker {
+    position: absolute;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: white;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: bold;
+    z-index: 5;
+    opacity: 0.7;
+}
+
+.dimension-marker-width {
+    bottom: 5px;
+    left: 5px;
+}
+
+.dimension-marker-height {
+    top: 30px;
+    left: 5px;
+}
+
+.preview-options {
+    margin-left: 20px;
+    display: flex;
+    align-items: center;
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    font-size: 0.9rem;
+    color: #555;
+    cursor: pointer;
+}
+
+.toggle-label input {
+    margin-right: 5px;
+}
+
+.preview-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-top: 10px;
+    background-color: #fff;
+    padding: 8px 15px;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    width: calc(100% - 20px);
+    justify-content: space-between;
+}
+
+.time-display {
+    font-family: monospace;
+    font-size: 0.9rem;
+    font-weight: bold;
+}
+
+/* Timeline styles */
+.timeline-container {
+    flex: 0 0 55%; /* 55% of the editor panel height */
+    background-color: #fff;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid #e0e0e0;
+    border-bottom: 1px solid #e0e0e0;
+    min-height: 200px;
+}
+
+.timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.timeline-header h2 {
+    font-size: 1.1rem;
+}
+
+.timeline-zoom {
+    display: flex;
+    gap: 5px;
+}
+
+.timeline-wrapper {
+    flex: 1;
+    display: flex;
+    position: relative;
+    overflow-x: auto;
+}
+
+.timeline-labels {
+    width: 80px;
+    background-color: #f5f5f7;
+    border-right: 1px solid #e0e0e0;
+}
+
+.timeline-label {
+    height: 60px;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.timeline-tracks {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.timeline-track {
+    height: 60px;
+    border-bottom: 1px solid #e0e0e0;
+    position: relative;
+}
+
+.audio-track {
+    background-color: #f9f9f9;
+}
+
+.empty-track {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    color: #999;
+    font-size: 0.9rem;
+}
+
+.time-marker {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 2px;
+    height: 100%;
+    background-color: #ff5252;
+    z-index: 10;
+}
+
+.time-ruler {
+    position: relative;
+    height: 25px;
+    background-color: #f0f0f0;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+}
+
+.time-ruler-top {
+    margin-left: 80px; /* Align with the tracks (account for labels width) */
+}
+
+/* Video Settings moved to header */
+
+/* Playback controls */
+.playback-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    padding: 15px;
+    background-color: #fff;
+    border-bottom: 1px solid #e0e0e0;
+    flex: 0 0 15%; /* 15% of the editor panel height */
+    min-height: 60px;
+}
+
+.control-buttons {
+    display: flex;
+    gap: 5px;
+}
+
+.control-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background-color: #016362; /* Match header color */
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.control-btn:hover {
+    background-color: #02a19f; /* Lighter shade */
+    transform: translateY(-1px);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.25);
+}
+
+.control-btn:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+}
+
+.control-btn:active {
+    transform: scale(0.95);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+/* Status bar */
+.status-bar {
+    height: 30px;
+    background-color: #f5f5f7;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 20px;
+    font-size: 0.8rem;
+    color: #666;
+}
+
+/* Media items */
+.media-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+    cursor: grab;
+    width: 100px;
+    text-align: center;
+}
+
+.media-item:hover {
+    background-color: #f0f0f0;
+}
+
+.media-item img {
+    width: 70px;
+    height: 70px;
+    object-fit: cover;
+    margin-bottom: 8px;
+    border-radius: 3px;
+}
+
+.media-item .media-info {
+    width: 100%;
+    overflow: hidden;
+}
+
+.media-item .media-name {
+    font-size: 0.8rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.media-item .media-type {
+    font-size: 0.7rem;
+    color: #999;
+}
+
+/* Timeline clips */
+.timeline-clip {
+    position: absolute;
+    height: 50px;
+    top: 5px;
+    background-color: #2c3e50;
+    border-radius: 3px;
+    color: white;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: move;
+    user-select: none;
+    overflow: hidden;
+}
+
+.timeline-clip img {
+    height: 100%;
+    width: auto;
+}
+
+.clip-resize-handle {
+    position: absolute;
+    width: 8px;
+    height: 100%;
+    top: 0;
+    background-color: rgba(255, 255, 255, 0.2);
+    cursor: col-resize;
+}
+
+.clip-resize-handle.left {
+    left: 0;
+}
+
+.clip-resize-handle.right {
+    right: 0;
+}
+
+.clip-delete-btn {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    width: 20px;
+    height: 20px;
+    background-color: #ff5252;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 20;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.timeline-clip:hover .clip-delete-btn {
+    opacity: 1;
+}
+
+.clip-delete-btn:hover {
+    background-color: #ff1744;
+}
+
+/* Touch action styles */
+.touch-action {
+    position: absolute;
+    width: 500px; /* Increased by another 250% from 200px */
+    height: 500px; /* Increased by another 250% from 200px */
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 10;
+    transform: translate(-50%, -50%);
+    opacity: 0.5; /* Added 50% transparency */
+}
+
+.touch-pulse {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background-color: rgba(255, 0, 0, 0.6); /* Changed to red with opacity */
+    animation: pulse 1.5s ease-out infinite;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(0.1);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(1.5); /* Increased zoom-out size */
+        opacity: 0;
+    }
+}
+
+.touch-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 125px; /* Increased by another 250% from 50px */
+    height: 125px; /* Increased by another 250% from 50px */
+    background-color: #ff0000; /* Changed to red */
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/* Touch action clip on timeline */
+.touch-action-clip {
+    background-color: #ff0000; /* Changed to red to match the touch action */
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* Changed to space-between for better button placement */
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 0 5px; /* Added padding for better spacing */
+    border: 2px solid #ff5252; /* Added border for better visibility */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); /* Added shadow for depth */
+}
+
+.touch-action-clip::before {
+    content: "👆";
+    margin-right: 3px;
+}
+
+/* Touch action remove button */
+.touch-remove-btn {
+    background-color: white;
+    color: #ff0000;
+    border: none;
+    border-radius: 3px;
+    width: 18px;
+    height: 18px;
+    font-size: 14px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    margin-left: 5px;
+}
+
+.touch-remove-btn:hover {
+    background-color: #ffdddd;
+}
+
+/* Audio waveform */
+.waveform-container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    overflow: hidden; /* Hide overflow for very long waveforms */
+}
+
+.waveform {
+    height: 100%;
+    background-color: #e9f0f7;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/* Export modal */
+.export-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.export-modal-content {
+    background-color: white;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    width: 400px;
+    max-width: 90%;
+    text-align: center;
+}
+
+.export-modal-content h3 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: #2c3e50;
+}
+
+.progress-container {
+    background-color: #f0f0f0;
+    border-radius: 4px;
+    height: 20px;
+    margin-bottom: 10px;
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-bar {
+    background-color: #016362; /* Match header color */
+    height: 100%;
+    width: 0;
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 12px;
+    font-weight: bold;
+    color: #333;
+}
+
+/* Video Preview Modal */
+.video-preview-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1100;
+}
+
+.video-preview-content {
+    background-color: white;
+    padding: 30px;
+    border-radius: 8px;
+    width: 80%;
+    max-width: 1000px;
+    position: relative;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.video-preview-close {
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    font-size: 24px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #666;
+}
+
+.video-preview-close:hover {
+    color: #016362; /* Match header color */
+}
+
+.video-container {
+    margin: 20px 0;
+    width: 100%;
+    background-color: #000;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.video-container video {
+    display: block;
+    width: 100%;
+    max-height: 70vh;
+}
+
+.download-info {
+    margin: 20px 0;
+    color: #666;
+    line-height: 1.5;
+}
+
+.download-btn {
+    display: inline-block;
+    padding: 12px 24px;
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+    .media-panel {
+        width: 200px;
+    }
+}
+
+@media (max-width: 900px) {
+    .app-main {
+        flex-direction: column;
+    }
+
+    .media-panel {
+        width: 100%;
+        height: 150px;
+        border-right: none;
+        border-bottom: 1px solid #e0e0e0;
+    }
+
+    .media-container {
+        display: flex;
+        overflow-x: auto;
+        padding: 10px;
+    }
+
+    .media-item {
+        min-width: 120px;
+        margin-right: 10px;
+        margin-bottom: 0;
+    }
+}

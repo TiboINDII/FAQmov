@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INDII Movie Creator</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="logo">INDII Movie Creator</div>
+            <div class="toolbar">
+                <div class="title-input">
+                    <label for="videoTitle">Start Screen Title:</label>
+                    <input type="text" id="videoTitle" placeholder="Enter title for start screen">
+                </div>
+                <button id="newProject" class="btn">New Project</button>
+                <button id="saveProject" class="btn">Save Project</button>
+                <button id="exportMovie" class="btn primary">Export Movie</button>
+            </div>
+        </header>
+
+        <div class="main-layout">
+            <!-- Left side: Editor panels -->
+            <div class="editor-panels">
+                <!-- Media panel -->
+                <div class="media-panel">
+                    <div class="panel-header">
+                        <h2>Media Library</h2>
+                        <div class="import-controls">
+                            <button id="importImages" class="btn">Import Images</button>
+                            <button id="importAudio" class="btn">Import Audio</button>
+                            <input type="file" id="imageInput" accept=".jpg,.jpeg,.png,.pdf" multiple hidden>
+                            <input type="file" id="audioInput" accept="audio/*" hidden>
+                        </div>
+                    </div>
+                    <div class="media-container" id="mediaLibrary">
+                        <!-- Imported media will appear here -->
+                        <div class="empty-state">
+                            <p>Import images and audio to get started</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Timeline container -->
+                <div class="timeline-container">
+                    <div class="timeline-header">
+                        <h2>Timeline</h2>
+                        <div class="timeline-zoom">
+                            <button id="zoomOut" class="btn">-</button>
+                            <button id="zoomIn" class="btn">+</button>
+                            <button id="fitToAudio" class="btn" title="Fit to Audio">Fit</button>
+                        </div>
+                    </div>
+                    <div id="timeRuler" class="time-ruler time-ruler-top"></div>
+                    <div class="timeline-wrapper">
+                        <div class="timeline-labels">
+                            <div class="timeline-label">Audio</div>
+                            <div class="timeline-label">Images</div>
+                            <div class="timeline-label">Touch Actions</div>
+                        </div>
+                        <div class="timeline-tracks">
+                            <div id="audioTrack" class="timeline-track audio-track">
+                                <!-- Audio waveform will appear here -->
+                                <div class="empty-track">Import audio to create timeline</div>
+                            </div>
+                            <div id="imageTrack" class="timeline-track image-track">
+                                <!-- Image clips will appear here -->
+                            </div>
+                            <div id="touchTrack" class="timeline-track touch-track">
+                                <!-- Touch action clips will appear here -->
+                            </div>
+                        </div>
+                        <div id="timeMarker" class="time-marker"></div>
+                    </div>
+                </div>
+
+                <!-- Video Settings section has been moved to the header -->
+
+                <!-- Playback controls -->
+                <div class="playback-controls">
+                    <div class="control-buttons">
+                        <button id="rewindStart" class="btn control-btn" title="Rewind to Start" disabled>⏮</button>
+                        <button id="rewindStep" class="btn control-btn" title="Rewind 5 Seconds" disabled>⏪</button>
+                        <button id="playPause" class="btn control-btn" title="Play/Pause" disabled>▶</button>
+                        <button id="stop" class="btn control-btn" title="Stop" disabled>⏹</button>
+                        <button id="forwardStep" class="btn control-btn" title="Forward 5 Seconds" disabled>⏩</button>
+                    </div>
+                    <div class="time-display">00:00 / 00:00</div>
+                    <div class="preview-options">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="toggleGrid" checked>
+                            Show Grid
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right side: Preview panel -->
+            <div class="preview-panel">
+                <div class="preview-container">
+                    <div class="preview-label">Portrait Mode (1284×2778px)</div>
+                    <div class="dimension-marker dimension-marker-width">1284px</div>
+                    <div class="dimension-marker dimension-marker-height">2778px</div>
+                    <div id="previewFrame" class="preview-frame">
+                        <!-- Preview content will appear here -->
+                        <div class="empty-preview">
+                            <p>Preview will appear here</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="status-bar">
+            <div class="project-info">New Project</div>
+            <div class="app-status">Ready</div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
