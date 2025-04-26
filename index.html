@@ -39,8 +39,10 @@
                         <div class="import-controls">
                             <button id="importImages" class="btn">Import Images</button>
                             <button id="importAudio" class="btn">Import Audio</button>
+                            <button id="loadProject" class="btn">Load Project</button>
                             <input type="file" id="imageInput" accept=".jpg,.jpeg,.png,.pdf" multiple hidden>
                             <input type="file" id="audioInput" accept="audio/*" hidden>
+                            <input type="file" id="projectInput" accept=".indii" hidden>
                         </div>
                     </div>
                     <div class="media-container" id="mediaLibrary">
@@ -66,7 +68,7 @@
                         <div class="timeline-labels">
                             <div class="timeline-label">Audio</div>
                             <div class="timeline-label">Images</div>
-                            <div class="timeline-label">Touch Actions</div>
+                            <div class="timeline-label">Highlight</div>
                         </div>
                         <div class="timeline-tracks">
                             <div id="audioTrack" class="timeline-track audio-track">
@@ -76,8 +78,8 @@
                             <div id="imageTrack" class="timeline-track image-track">
                                 <!-- Image clips will appear here -->
                             </div>
-                            <div id="touchTrack" class="timeline-track touch-track">
-                                <!-- Touch action clips will appear here -->
+                            <div id="highlightTrack" class="timeline-track highlight-track">
+                                <!-- Highlight markers will appear here -->
                             </div>
                         </div>
                         <div id="timeMarker" class="time-marker"></div>

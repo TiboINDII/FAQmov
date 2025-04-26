@@ -6,7 +6,11 @@ const audioInput = document.getElementById('audioInput');
 const mediaLibrary = document.getElementById('mediaLibrary');
 const audioTrack = document.getElementById('audioTrack');
 const imageTrack = document.getElementById('imageTrack');
-const touchTrack = document.getElementById('touchTrack');
+const highlightTrack = document.getElementById('highlightTrack');
+
+// Project loading elements
+const loadProjectBtn = document.getElementById('loadProject');
+const projectInput = document.getElementById('projectInput');
 const previewFrame = document.getElementById('previewFrame');
 const previewContainer = document.querySelector('.preview-container');
 const playPauseBtn = document.getElementById('playPause');
@@ -41,10 +45,12 @@ const state = {
     timelineScale: 100, // pixels per second
     timelineWidth: 0,
     clips: [],
-    touchActions: [], // Array to store touch actions
+    highlights: [], // Array to store highlight markers
     selectedClip: null,
+    selectedHighlight: null, // Currently selected highlight
     isDragging: false,
     isResizing: false,
+    isDraggingHighlight: false, // Flag for dragging highlights
     resizeDirection: null,
     dragStartX: 0,
     dragStartY: 0,
@@ -54,9 +60,11 @@ const state = {
     previewScale: 0.2,
     videoTitle: '',
     startScreenImage: 'startscreen.webp',
-    touchColor: '#ff0000', // Changed to red for better visibility
     exportMimeType: '', // Will store the selected MIME type for export
-    exportFormat: 'avi' // Default export format
+    exportFormat: 'avi', // Default export format
+    highlightColor: '#016362', // Dark green color for highlight pulse animations
+    mouseX: 50, // Current mouse X position in preview (percentage)
+    mouseY: 50  // Current mouse Y position in preview (percentage)
 };
 
 // Initialize the application
@@ -64,8 +72,10 @@ function init() {
     // Set up event listeners
     importImagesBtn.addEventListener('click', () => imageInput.click());
     importAudioBtn.addEventListener('click', () => audioInput.click());
+    loadProjectBtn.addEventListener('click', () => projectInput.click());
     imageInput.addEventListener('change', handleImageImport);
     audioInput.addEventListener('change', handleAudioImport);
+    projectInput.addEventListener('change', handleProjectImport);
 
     // Playback controls
     playPauseBtn.addEventListener('click', togglePlayback);
@@ -74,8 +84,7 @@ function init() {
     rewindStepBtn.addEventListener('click', () => seekRelative(-5)); // Rewind 5 seconds
     forwardStepBtn.addEventListener('click', () => seekRelative(5)); // Forward 5 seconds
 
-    // Touch action controls
-    previewFrame.addEventListener('click', handlePreviewClick);
+    // Touch action functionality has been removed
 
     // Other controls
     zoomInBtn.addEventListener('click', () => changeTimelineZoom(1.2));
@@ -259,32 +268,64 @@ function handleImageImport(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
-    // Process each file
-    Array.from(files).forEach(file => {
-        // Check if file is an image or PDF
-        if (file.type.startsWith('image/') || file.type === 'application/pdf') {
-            const reader = new FileReader();
+    // Create an array to hold new media items
+    const newMediaItems = [];
 
-            reader.onload = function(e) {
-                const mediaItem = {
-                    id: generateId(),
-                    name: file.name,
-                    type: file.type,
-                    src: e.target.result,
-                    file: file
+    // Process each file
+    const filePromises = Array.from(files).map(file => {
+        return new Promise((resolve) => {
+            // Check if file is an image or PDF
+            if (file.type.startsWith('image/') || file.type === 'application/pdf') {
+                const reader = new FileReader();
+
+                reader.onload = function(e) {
+                    const mediaItem = {
+                        id: generateId(),
+                        name: file.name,
+                        type: file.type,
+                        src: e.target.result,
+                        file: file
+                    };
+
+                    newMediaItems.push(mediaItem);
+                    resolve();
                 };
 
-                state.mediaItems.push(mediaItem);
-                addMediaItemToLibrary(mediaItem);
-            };
+                reader.readAsDataURL(file);
+            } else {
+                resolve();
+            }
+        });
+    });
 
-            reader.readAsDataURL(file);
-        }
+    // After all files are processed, sort and add to library
+    Promise.all(filePromises).then(() => {
+        // Sort all media items alphabetically by name
+        const allMediaItems = [...state.mediaItems, ...newMediaItems];
+        allMediaItems.sort((a, b) => a.name.localeCompare(b.name));
+
+        // Update state with sorted media items
+        state.mediaItems = allMediaItems;
+
+        // Clear and rebuild the media library
+        rebuildMediaLibrary();
+
+        updateStatus(`${newMediaItems.length} images imported and sorted alphabetically`);
     });
 
     // Reset input
     event.target.value = '';
-    updateStatus('Images imported');
+}
+
+// Rebuild the entire media library with sorted items
+function rebuildMediaLibrary() {
+    // Clear the media library
+    mediaLibrary.innerHTML = '';
+
+    // Add all media items in sorted order
+    state.mediaItems.forEach(mediaItem => {
+        addMediaItemToLibrary(mediaItem);
+    });
 }
 
 // Handle audio import
@@ -334,64 +375,111 @@ function processAudioFile(audioSrc) {
     waveformContainer.className = 'waveform-container';
     audioTrack.appendChild(waveformContainer);
 
-    // Decode audio data
-    fetch(audioSrc)
-        .then(response => response.arrayBuffer())
-        .then(arrayBuffer => state.audioContext.decodeAudioData(arrayBuffer))
-        .then(originalAudioBuffer => {
-            // Add 3 seconds of silence at the beginning (with first 2 seconds for the start screen)
-            const silenceDuration = 3; // 3 seconds of silence
-            const originalDuration = originalAudioBuffer.duration;
-            const newDuration = originalDuration + silenceDuration;
+    // Show loading indicator
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.className = 'loading-indicator';
+    loadingIndicator.textContent = 'Processing audio...';
+    waveformContainer.appendChild(loadingIndicator);
 
-            // Create a new buffer with the extended duration
-            const newAudioBuffer = state.audioContext.createBuffer(
-                originalAudioBuffer.numberOfChannels,
-                state.audioContext.sampleRate * newDuration,
-                state.audioContext.sampleRate
-            );
+    // Make sure the audio context is running
+    if (state.audioContext.state === 'suspended') {
+        state.audioContext.resume();
+    }
 
-            // Copy the original audio data, offset by 3 seconds
-            for (let channel = 0; channel < originalAudioBuffer.numberOfChannels; channel++) {
-                const originalData = originalAudioBuffer.getChannelData(channel);
-                const newData = newAudioBuffer.getChannelData(channel);
+    // For data URLs, we need to extract the base64 part
+    let audioData;
+    if (audioSrc.startsWith('data:')) {
+        // Extract the base64 part of the data URL
+        const base64String = audioSrc.split(',')[1];
+        // Convert base64 to array buffer
+        const binaryString = atob(base64String);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        audioData = bytes.buffer;
+    } else {
+        // For regular URLs, use fetch
+        fetch(audioSrc)
+            .then(response => response.arrayBuffer())
+            .then(buffer => processAudioBuffer(buffer))
+            .catch(error => {
+                console.error('Error fetching audio data:', error);
+                updateStatus('Error loading audio file');
+                waveformContainer.innerHTML = '<div class="error-message">Error loading audio</div>';
+            });
+        return;
+    }
 
-                // The first 3 seconds will remain silent (filled with zeros)
-                // Copy the original data starting at the 3-second mark
-                const silenceSamples = state.audioContext.sampleRate * silenceDuration;
-                for (let i = 0; i < originalData.length; i++) {
-                    newData[i + silenceSamples] = originalData[i];
+    // Process the audio buffer
+    processAudioBuffer(audioData);
+
+    function processAudioBuffer(arrayBuffer) {
+        state.audioContext.decodeAudioData(arrayBuffer)
+            .then(originalAudioBuffer => {
+                // Remove loading indicator
+                if (loadingIndicator.parentNode) {
+                    loadingIndicator.parentNode.removeChild(loadingIndicator);
                 }
-            }
 
-            // Store the new buffer and duration
-            state.audioBuffer = newAudioBuffer;
-            state.audioDuration = newDuration;
+                // Add 3 seconds of silence at the beginning (with first 2 seconds for the start screen)
+                const silenceDuration = 3; // 3 seconds of silence
+                const originalDuration = originalAudioBuffer.duration;
+                const newDuration = originalDuration + silenceDuration;
 
-            // Set zoom level to fit the entire audio clip first
-            // This will determine the optimal scale for the waveform
-            setZoomToFitAudio();
+                // Create a new buffer with the extended duration
+                const newAudioBuffer = state.audioContext.createBuffer(
+                    originalAudioBuffer.numberOfChannels,
+                    state.audioContext.sampleRate * newDuration,
+                    state.audioContext.sampleRate
+                );
 
-            // Create waveform visualization with the current scale
-            createWaveform(newAudioBuffer, waveformContainer);
+                // Copy the original audio data, offset by 3 seconds
+                for (let channel = 0; channel < originalAudioBuffer.numberOfChannels; channel++) {
+                    const originalData = originalAudioBuffer.getChannelData(channel);
+                    const newData = newAudioBuffer.getChannelData(channel);
 
-            // Update timeline width based on audio duration
-            updateTimelineWidth();
+                    // The first 3 seconds will remain silent (filled with zeros)
+                    // Copy the original data starting at the 3-second mark
+                    const silenceSamples = state.audioContext.sampleRate * silenceDuration;
+                    for (let i = 0; i < originalData.length; i++) {
+                        newData[i + silenceSamples] = originalData[i];
+                    }
+                }
 
-            // Update time display
-            updateTimeDisplay();
+                // Store the new buffer and duration
+                state.audioBuffer = newAudioBuffer;
+                state.audioDuration = newDuration;
 
-            // Add start screen clip automatically
-            addStartScreenClip();
+                // Extract audio data for waveform visualization
+                state.audioData = newAudioBuffer.getChannelData(0);
 
-            // Log the adjustment
-            console.log(`Audio loaded with 3s silence prefix: ${state.audioDuration.toFixed(2)}s, Scale: ${state.timelineScale.toFixed(2)}px/sec`);
-            updateStatus('Audio imported with 3s silence prefix (2s start screen)');
-        })
-        .catch(error => {
-            console.error('Error decoding audio data', error);
-            updateStatus('Error processing audio');
-        });
+                // Set zoom level to fit the entire audio clip first
+                // This will determine the optimal scale for the waveform
+                setZoomToFitAudio();
+
+                // Create waveform visualization with the current scale
+                createWaveform(newAudioBuffer, waveformContainer);
+
+                // Update timeline width based on audio duration
+                updateTimelineWidth();
+
+                // Update time display
+                updateTimeDisplay();
+
+                // Add start screen clip automatically
+                addStartScreenClip();
+
+                // Log the adjustment
+                console.log(`Audio loaded with 3s silence prefix: ${state.audioDuration.toFixed(2)}s, Scale: ${state.timelineScale.toFixed(2)}px/sec`);
+                updateStatus('Audio imported with 3s silence prefix (2s start screen)');
+            })
+            .catch(error => {
+                console.error('Error decoding audio data:', error);
+                updateStatus('Error processing audio');
+                waveformContainer.innerHTML = '<div class="error-message">Error decoding audio</div>';
+            });
+    }
 }
 
 // Create audio waveform visualization
@@ -399,45 +487,59 @@ function createWaveform(audioBuffer, container) {
     // Clear any existing waveform
     container.innerHTML = '';
 
+    // Create canvas for waveform
     const canvas = document.createElement('canvas');
     canvas.className = 'waveform';
     canvas.id = 'waveformCanvas';
     container.appendChild(canvas);
 
+    // Get the drawing context
     const ctx = canvas.getContext('2d');
-    const data = audioBuffer.getChannelData(0); // Use first channel
 
-    // Store the audio data in the state for reuse when zooming
+    // Make sure we have audio data
     if (!state.audioData) {
-        state.audioData = data;
+        state.audioData = audioBuffer.getChannelData(0); // Use first channel
     }
 
     // Calculate the width based on audio duration and current scale
-    const calculatedWidth = Math.ceil(state.audioDuration * state.timelineScale) + 80; // Add 80px for labels
+    const calculatedWidth = Math.ceil(state.audioDuration * state.timelineScale);
 
     // Resize canvas - use the calculated width or container width, whichever is larger
     canvas.width = Math.max(calculatedWidth, container.clientWidth);
     canvas.height = container.clientHeight;
 
+    console.log(`Creating waveform with width: ${canvas.width}px, height: ${canvas.height}px, scale: ${state.timelineScale}px/sec`);
+
     // Draw waveform
-    drawWaveform(ctx, data, canvas.width, canvas.height, state.timelineScale);
+    drawWaveform(ctx, state.audioData, canvas.width, canvas.height, state.timelineScale);
 }
 
 // Draw waveform with current scale
 function drawWaveform(ctx, data, width, height, scale) {
+    // Check if we have valid data
+    if (!data || data.length === 0) {
+        console.error('No audio data available for waveform');
+        return;
+    }
+
+    // Set drawing styles
     ctx.fillStyle = '#4a90e2';
     ctx.strokeStyle = '#2c3e50';
     ctx.lineWidth = 1;
 
+    // Calculate amplitude and samples per pixel
     const amp = height / 2;
     const samplesPerSecond = data.length / state.audioDuration;
     const samplesPerPixel = samplesPerSecond / scale;
 
-    ctx.clearRect(0, 0, width, height);
-    ctx.beginPath();
+    console.log(`Drawing waveform: ${data.length} samples, ${samplesPerSecond.toFixed(2)} samples/sec, ${samplesPerPixel.toFixed(2)} samples/pixel`);
 
-    // Start at the middle
-    ctx.moveTo(0, amp);
+    // Clear the canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Begin drawing path
+    ctx.beginPath();
+    ctx.moveTo(0, amp); // Start at the middle
 
     // Draw waveform based on current scale
     for (let i = 0; i < width; i++) {
@@ -456,10 +558,28 @@ function drawWaveform(ctx, data, width, height, scale) {
         }
 
         // Draw min and max as a vertical line
-        ctx.lineTo(i, (1 + min) * amp);
-        ctx.lineTo(i, (1 + max) * amp);
+        const minY = (1 + min) * amp;
+        const maxY = (1 + max) * amp;
+
+        // Ensure we're drawing visible lines
+        if (minY !== maxY) {
+            ctx.moveTo(i, minY);
+            ctx.lineTo(i, maxY);
+        } else {
+            // If min equals max, draw a small line
+            ctx.moveTo(i, minY - 1);
+            ctx.lineTo(i, maxY + 1);
+        }
     }
 
+    // Complete the stroke
+    ctx.stroke();
+
+    // Draw a center line for reference
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+    ctx.moveTo(0, amp);
+    ctx.lineTo(width, amp);
     ctx.stroke();
 }
 
@@ -526,8 +646,8 @@ function setupTimelineInteraction() {
 
     imageTrack.addEventListener('drop', handleImageTrackDrop);
 
-    // Set up touch track for drag and drop
-    touchTrack.addEventListener('dragover', event => {
+    // Set up highlight track for drag and drop
+    highlightTrack.addEventListener('dragover', event => {
         event.preventDefault();
         // Show a move cursor to indicate repositioning
         event.dataTransfer.dropEffect = 'move';
@@ -540,6 +660,21 @@ function setupTimelineInteraction() {
     // Set up mouse events for timeline interaction
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+
+    // Track mouse position in preview frame
+    previewFrame.addEventListener('mousemove', trackMousePositionInPreview);
+
+    // Set default mouse position to center when mouse leaves preview
+    previewFrame.addEventListener('mouseleave', () => {
+        state.mouseX = 50;
+        state.mouseY = 50;
+    });
+
+    // Set up spacebar for adding highlights instead of mouse clicks
+    document.addEventListener('keydown', handleSpacebarForHighlight);
+
+    // Make the timeline marker draggable
+    timeMarker.addEventListener('mousedown', handleTimeMarkerMouseDown);
 }
 
 // Handle dropping an image onto the timeline
@@ -688,10 +823,77 @@ function handleResizeHandleMouseDown(event) {
     event.stopPropagation();
 }
 
+// Track mouse position in the preview frame
+function trackMousePositionInPreview(event) {
+    // Get mouse coordinates relative to the preview frame
+    const rect = previewFrame.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    // Calculate position as percentage of frame dimensions
+    state.mouseX = (x / rect.width) * 100;
+    state.mouseY = (y / rect.height) * 100;
+}
+
+// Handle mouse down on the time marker
+function handleTimeMarkerMouseDown(event) {
+    // Only allow dragging if audio is loaded
+    if (!state.audioBuffer) {
+        updateStatus('Import audio before using the timeline marker');
+        return;
+    }
+
+    // Set dragging state
+    state.isDraggingMarker = true;
+
+    // Store initial position
+    state.dragStartX = event.clientX;
+
+    // Prevent default behavior and stop propagation
+    event.preventDefault();
+    event.stopPropagation();
+
+    // Add a class to indicate dragging
+    timeMarker.classList.add('dragging');
+
+    // Update status
+    updateStatus('Dragging timeline marker...');
+}
+
 // Handle mouse move for dragging and resizing
 function handleMouseMove(event) {
     // Check if audio is loaded
     if (!state.audioBuffer || !state.audioDuration) return;
+
+    // Handle timeline marker dragging
+    if (state.isDraggingMarker) {
+        // Get the timeline tracks container
+        const tracksContainer = document.querySelector('.timeline-tracks');
+        const rect = tracksContainer.getBoundingClientRect();
+
+        // Calculate new position (account for the 80px label width)
+        const newX = event.clientX - rect.left - 80;
+
+        // Ensure we don't go before the start or after the end
+        const clampedX = Math.max(0, Math.min(newX, state.audioDuration * state.timelineScale));
+
+        // Calculate new time
+        const newTime = clampedX / state.timelineScale;
+
+        // Update current time
+        state.currentTime = newTime;
+
+        // Update time marker position
+        timeMarker.style.left = `${80 + clampedX}px`;
+
+        // Update time display
+        updateTimeDisplay();
+
+        // Update preview
+        updatePreview();
+
+        return;
+    }
 
     if (state.isDragging && state.selectedClip) {
         // Skip if it's a start screen clip (should stay at position 0)
@@ -774,87 +976,135 @@ function handleMouseMove(event) {
 
         // Update preview
         updatePreview();
-    } else if (state.isDraggingTouchAction && state.selectedTouchAction) {
-        // Calculate new position for touch action
+    } else if (state.isDraggingHighlight && state.selectedHighlight) {
+        // Calculate new position for highlight marker
         const deltaX = event.clientX - state.dragStartX;
         const newLeft = Math.max(0, state.originalLeft + deltaX);
 
         // Calculate new time
-        const newStartTime = newLeft / state.timelineScale;
+        const newTime = newLeft / state.timelineScale;
 
-        // Calculate end time
-        const newEndTime = newStartTime + state.selectedTouchAction.duration;
+        // Check if the highlight would extend beyond the audio duration
+        if (newTime > state.audioDuration) {
+            // Adjust position to keep the highlight within the audio duration
+            const adjustedLeft = state.audioDuration * state.timelineScale;
 
-        // Check if the touch action would extend beyond the audio duration
-        if (newEndTime > state.audioDuration) {
-            // Adjust position to keep the touch action within the audio duration
-            const adjustedLeft = (state.audioDuration - state.selectedTouchAction.duration) * state.timelineScale;
+            // Update highlight marker position
+            const markerElement = document.querySelector(`.highlight-marker[data-id="${state.selectedHighlight.id}"]`);
+            if (markerElement) {
+                markerElement.style.left = `${adjustedLeft}px`;
 
-            // Update touch action element position
-            const touchActionElement = document.querySelector(`.touch-action-clip[data-id="${state.selectedTouchAction.id}"]`);
-            if (touchActionElement) {
-                touchActionElement.style.left = `${adjustedLeft}px`;
-
-                // Update position info text
-                const posInfo = touchActionElement.querySelector('.pos-info');
-                if (posInfo) {
-                    posInfo.textContent = formatTime(state.audioDuration - state.selectedTouchAction.duration);
+                // Update time label
+                const timeLabel = markerElement.querySelector('.highlight-time');
+                if (timeLabel) {
+                    timeLabel.textContent = formatTime(state.audioDuration);
                 }
             }
 
-            // Update touch action data
-            state.selectedTouchAction.startTime = state.audioDuration - state.selectedTouchAction.duration;
+            // Update highlight data
+            state.selectedHighlight.time = state.audioDuration;
         } else {
-            // Update touch action element position
-            const touchActionElement = document.querySelector(`.touch-action-clip[data-id="${state.selectedTouchAction.id}"]`);
-            if (touchActionElement) {
-                touchActionElement.style.left = `${newLeft}px`;
+            // Update highlight marker position
+            const markerElement = document.querySelector(`.highlight-marker[data-id="${state.selectedHighlight.id}"]`);
+            if (markerElement) {
+                markerElement.style.left = `${newLeft}px`;
 
-                // Update position info text
-                const posInfo = touchActionElement.querySelector('.pos-info');
-                if (posInfo) {
-                    posInfo.textContent = formatTime(newStartTime);
+                // Update time label
+                const timeLabel = markerElement.querySelector('.highlight-time');
+                if (timeLabel) {
+                    timeLabel.textContent = formatTime(newTime);
                 }
             }
 
-            // Update touch action data
-            state.selectedTouchAction.startTime = newStartTime;
+            // Update highlight data
+            state.selectedHighlight.time = newTime;
         }
-
-        // Update preview
-        updatePreview();
     }
 }
 
 // Handle mouse up to end dragging or resizing
 function handleMouseUp() {
+    // Handle timeline marker dragging end
+    if (state.isDraggingMarker) {
+        // Remove dragging class
+        timeMarker.classList.remove('dragging');
+
+        // Add touch-ready class if not at the beginning
+        if (state.currentTime > 0) {
+            const previewContainer = document.querySelector('.preview-container');
+            if (previewContainer) {
+                previewContainer.classList.add('touch-ready');
+            }
+            updateStatus(`Timeline position: ${formatTime(state.currentTime)} - Press SPACEBAR to add highlight`);
+        } else {
+            updateStatus(`Timeline position: ${formatTime(state.currentTime)}`);
+        }
+
+        // Reset marker dragging state
+        state.isDraggingMarker = false;
+        return;
+    }
+
     // Reset dragging states
     state.isDragging = false;
     state.isResizing = false;
     state.resizeDirection = null;
 
-    // Handle touch action dragging end
-    if (state.isDraggingTouchAction && state.selectedTouchAction) {
+    // Handle highlight dragging end
+    if (state.isDraggingHighlight && state.selectedHighlight) {
         // Reset cursor and selected class
-        const touchActionElement = document.querySelector(`.touch-action-clip[data-id="${state.selectedTouchAction.id}"]`);
-        if (touchActionElement) {
-            touchActionElement.style.cursor = 'grab';
-            touchActionElement.classList.remove('selected');
+        const markerElement = document.querySelector(`.highlight-marker[data-id="${state.selectedHighlight.id}"]`);
+        if (markerElement) {
+            markerElement.style.cursor = 'grab';
         }
 
         // Update status
-        updateStatus(`Touch action moved to ${formatTime(state.selectedTouchAction.startTime)}`);
+        updateStatus(`Highlight moved to ${formatTime(state.selectedHighlight.time)}`);
+
+        // Reset highlight dragging state
+        state.isDraggingHighlight = false;
+    }
+}
+
+// Import startscreen.png as a regular media item from online URL
+function importStartScreenImage() {
+    // Use the online URL to avoid CORS issues
+    const startScreenUrl = 'https://tiboindii.github.io/FAQmov/startscreen.png';
+
+    // Check if startscreen.png is already imported
+    const existingStartScreen = state.mediaItems.find(item => item.src === startScreenUrl);
+    if (existingStartScreen) {
+        console.log('Start screen image already imported');
+        return existingStartScreen;
     }
 
-    // Reset touch action dragging state
-    state.isDraggingTouchAction = false;
-    state.selectedTouchAction = null;
+    // Create a new media item for the start screen
+    const startScreenItem = {
+        id: generateId(),
+        name: 'startscreen.png',
+        type: 'image/png',
+        src: startScreenUrl
+    };
+
+    // Add to media items array
+    state.mediaItems.push(startScreenItem);
+
+    // Add to library
+    addMediaItemToLibrary(startScreenItem);
+
+    console.log('Start screen image imported automatically from online URL');
+    return startScreenItem;
 }
 
 // Add start screen clip automatically
 function addStartScreenClip() {
-    // Check if there's already a start screen clip
-    const existingStartScreenClip = state.clips.find(clip => clip.isStartScreen);
+    // First, make sure the start screen image is imported
+    const startScreenItem = importStartScreenImage();
+
+    // Check if there's already a start screen clip at time 0 with this media ID
+    const existingStartScreenClip = state.clips.find(clip =>
+        clip.startTime === 0 && clip.mediaId === startScreenItem.id
+    );
 
     if (existingStartScreenClip) {
         // Update the existing start screen clip duration to 2 seconds
@@ -871,7 +1121,7 @@ function addStartScreenClip() {
         // Create a new start screen clip
         const startScreenClip = {
             id: generateId(),
-            isStartScreen: true, // Special flag for start screen
+            mediaId: startScreenItem.id, // Use the media ID of the imported start screen
             startTime: 0,
             duration: 2, // 2 seconds duration
             track: 'image'
@@ -880,8 +1130,8 @@ function addStartScreenClip() {
         // Add to clips array
         state.clips.push(startScreenClip);
 
-        // Create clip element
-        createStartScreenClipElement(startScreenClip);
+        // Create clip element using the standard function
+        createClipElement(startScreenClip);
 
         console.log('Start screen clip added automatically');
     }
@@ -1016,7 +1266,16 @@ function handleTimelineClick(event) {
         updateTimeMarker();
         updatePreview();
 
-        updateStatus(`Jumped to ${formatTime(clickTime)}`);
+        // Add touch-ready class if not at the beginning
+        if (clickTime > 0) {
+            const previewContainer = document.querySelector('.preview-container');
+            if (previewContainer) {
+                previewContainer.classList.add('touch-ready');
+            }
+            updateStatus(`Jumped to ${formatTime(clickTime)} - Press SPACEBAR to add highlight`);
+        } else {
+            updateStatus(`Jumped to ${formatTime(clickTime)}`);
+        }
     } else {
         // If clicked beyond audio duration, show a message
         updateStatus(`Cannot navigate beyond the end of audio (${formatTime(state.audioDuration)})`);
@@ -1046,15 +1305,16 @@ function startPlayback() {
     // Enable stop button
     stopBtn.disabled = false;
 
-    // Add touch-ready class to preview container
+    // Add touch-ready and playing classes to preview container
     const previewContainer = document.querySelector('.preview-container');
     if (previewContainer) {
         previewContainer.classList.add('touch-ready');
+        previewContainer.classList.add('playing');
     }
 
     // Update preview to hide start screen
     updatePreview();
-    updateStatus('Ready for touch actions');
+    updateStatus('Position cursor and press SPACEBAR to add highlight');
 }
 
 // Pause playback
@@ -1066,10 +1326,19 @@ function pausePlayback() {
     playPauseBtn.title = 'Play';
     state.isPlaying = false;
 
-    // Remove touch-ready class from preview container
+    // Keep the touch-ready class to allow adding highlights when paused
+    // Only remove it if we're at the start screen (time 0)
     const previewContainer = document.querySelector('.preview-container');
     if (previewContainer) {
-        previewContainer.classList.remove('touch-ready');
+        // Always remove the playing class
+        previewContainer.classList.remove('playing');
+
+        if (state.currentTime === 0) {
+            previewContainer.classList.remove('touch-ready');
+        } else {
+            // Update the status to inform user they can add highlights while paused
+            updateStatus('Paused - Press SPACEBAR to add highlight at current position');
+        }
     }
 
     // Clear any existing touch ready timeout
@@ -1080,7 +1349,6 @@ function pausePlayback() {
 
     // Update preview - keep showing the current frame
     updatePreview();
-    updateStatus('Paused');
 }
 
 // Stop playback and reset to beginning
@@ -1093,10 +1361,11 @@ function stopPlayback() {
     playPauseBtn.title = 'Play';
     state.isPlaying = false;
 
-    // Remove touch-ready class from preview container
+    // Always remove touch-ready and playing classes when stopped (since we're at time 0)
     const previewContainer = document.querySelector('.preview-container');
     if (previewContainer) {
         previewContainer.classList.remove('touch-ready');
+        previewContainer.classList.remove('playing');
     }
 
     // Clear any existing touch ready timeout
@@ -1108,7 +1377,7 @@ function stopPlayback() {
     // Update displays
     updateTimeDisplay();
     updatePreview(); // This will show the start screen since currentTime = 0
-    updateStatus('Stopped');
+    updateStatus('Stopped - Use timeline or play button to continue');
 }
 
 // Rewind to start
@@ -1226,9 +1495,16 @@ function updateTimeMarker() {
         // Update time display
         updateTimeDisplay();
 
-        // Only update preview during playback if needed
-        // This prevents constant rebuilding of the DOM
-        if (state.currentTime % 0.5 < 0.1) { // Update roughly every half second
+        // Update preview more frequently to ensure highlights are shown
+        // We need to check for highlights more often than every half second
+        // Check for any highlights that might be close to the current time
+        const needsUpdate = state.highlights.some(highlight => {
+            // Check if we're within 0.15 seconds of any highlight
+            return Math.abs(highlight.time - state.currentTime) < 0.15;
+        });
+
+        // Update preview if we're close to a highlight or every 0.2 seconds
+        if (needsUpdate || state.currentTime % 0.2 < 0.05) {
             updatePreview();
         }
     } else if (wasPlaying) {
@@ -1276,7 +1552,7 @@ function updateTimelineWidth() {
     // Set width of tracks
     audioTrack.style.width = `${width}px`;
     imageTrack.style.width = `${width}px`;
-    touchTrack.style.width = `${width}px`;
+    highlightTrack.style.width = `${width}px`;
 
     // Update state
     state.timelineWidth = width;
@@ -1399,8 +1675,8 @@ function changeTimelineZoom(factor) {
     // Update clip positions and sizes
     updateClipElements();
 
-    // Update touch action positions
-    updateTouchActionPositions();
+    // Update highlight marker positions
+    updateHighlightMarkers();
 
     // Update time ruler with new scale
     createTimeRuler();
@@ -1413,10 +1689,18 @@ function changeTimelineZoom(factor) {
 
 // Update waveform with current scale
 function updateWaveformWithCurrentScale() {
-    if (!state.audioData || !state.audioBuffer) return;
+    if (!state.audioData || !state.audioBuffer) {
+        console.warn('Cannot update waveform: No audio data available');
+        return;
+    }
 
     const waveformContainer = document.querySelector('.waveform-container');
-    if (!waveformContainer) return;
+    if (!waveformContainer) {
+        console.warn('Cannot update waveform: No waveform container found');
+        return;
+    }
+
+    console.log('Updating waveform with current scale:', state.timelineScale);
 
     // Get existing canvas or create a new one
     let canvas = document.getElementById('waveformCanvas');
@@ -1430,7 +1714,7 @@ function updateWaveformWithCurrentScale() {
     const ctx = canvas.getContext('2d');
 
     // Calculate the width based on audio duration and current scale
-    const calculatedWidth = Math.ceil(state.audioDuration * state.timelineScale) + 80;
+    const calculatedWidth = Math.ceil(state.audioDuration * state.timelineScale);
 
     // Resize canvas
     canvas.width = Math.max(calculatedWidth, waveformContainer.clientWidth);
@@ -1468,8 +1752,8 @@ function setZoomToFitAudio() {
     // Update clip positions and sizes
     updateClipElements();
 
-    // Update touch action positions
-    updateTouchActionPositions();
+    // Update highlight marker positions
+    updateHighlightMarkers();
 
     // Update time ruler with new scale
     createTimeRuler();
@@ -1478,6 +1762,17 @@ function setZoomToFitAudio() {
     updateWaveformWithCurrentScale();
 
     updateStatus(`Timeline zoomed to fit audio (${Math.round(state.timelineScale)}px/sec)`);
+}
+
+// Update highlight marker positions after zoom change
+function updateHighlightMarkers() {
+    // Update all highlight markers on the timeline
+    state.highlights.forEach(highlight => {
+        const markerElement = document.querySelector(`.highlight-marker[data-id="${highlight.id}"]`);
+        if (markerElement) {
+            markerElement.style.left = `${highlight.time * state.timelineScale}px`;
+        }
+    });
 }
 
 // Update touch action positions after zoom change
@@ -1515,147 +1810,103 @@ function updatePreview() {
     // Clear previous content
     previewFrame.innerHTML = '';
 
-    // Check for start screen clip at current time
-    const startScreenClip = state.clips.find(clip =>
-        clip.isStartScreen &&
-        state.currentTime >= clip.startTime &&
-        state.currentTime < (clip.startTime + clip.duration)
-    );
+    // If we're at the beginning (time = 0) and not playing, show the start screen
+    if (state.currentTime === 0 && !state.isPlaying) {
+        // Import the start screen image if needed
+        const startScreenItem = importStartScreenImage();
 
-    // Show start screen when at the beginning (time = 0) and not playing
-    // OR when a start screen clip is active at the current time
-    if ((state.currentTime === 0 && !state.isPlaying) || startScreenClip) {
-        // Create a pre-rendered start screen with title
-        const preRenderStartScreen = () => {
-            // Create a canvas to compose the start screen with title
-            const canvas = document.createElement('canvas');
-            canvas.width = 1284;
-            canvas.height = 2778;
-            const ctx = canvas.getContext('2d');
+        // Create an image element for the start screen
+        const img = document.createElement('img');
+        img.src = startScreenItem.src; // This is the online URL
+        img.style.position = 'absolute';
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.objectFit = 'contain';
+        img.style.left = '0';
+        img.style.top = '0';
+        previewFrame.appendChild(img);
 
-            // First fill with the header color as a fallback
-            ctx.fillStyle = '#016362';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Add title if available
+        if (state.videoTitle) {
+            // Create title container without background
+            const titleContainer = document.createElement('div');
+            titleContainer.className = 'title-container';
+            titleContainer.style.position = 'absolute';
+            titleContainer.style.top = '50%';
+            titleContainer.style.left = '50%';
+            titleContainer.style.transform = 'translate(-50%, -50%)';
+            titleContainer.style.padding = '20px 40px';
+            titleContainer.style.textAlign = 'center';
 
-            // Create and load the background image
-            const backgroundImg = new Image();
-            backgroundImg.onload = () => {
-                // Draw the background image with proper aspect ratio
-                try {
-                    // Calculate dimensions to maintain aspect ratio (cover style)
-                    const imgAspect = backgroundImg.naturalWidth / backgroundImg.naturalHeight;
-                    const canvasAspect = canvas.width / canvas.height;
+            // Create title element with dark green text
+            const titleElement = document.createElement('div');
+            titleElement.className = 'start-screen-title';
+            titleElement.textContent = state.videoTitle;
+            titleElement.style.color = '#016362'; // Dark green color
+            titleElement.style.fontSize = '42px'; // Larger font size for better visibility
+            titleElement.style.fontWeight = 'bold';
+            titleElement.style.textShadow = '0 2px 4px rgba(255, 255, 255, 0.5)'; // Light shadow for contrast
 
-                    let drawWidth, drawHeight, drawX, drawY;
-
-                    if (imgAspect > canvasAspect) {
-                        // Image is wider than canvas (relative to height)
-                        drawHeight = canvas.height;
-                        drawWidth = canvas.height * imgAspect;
-                        drawX = (canvas.width - drawWidth) / 2;
-                        drawY = 0;
-                    } else {
-                        // Image is taller than canvas (relative to width)
-                        drawWidth = canvas.width;
-                        drawHeight = canvas.width / imgAspect;
-                        drawX = 0;
-                        drawY = (canvas.height - drawHeight) / 2;
-                    }
-
-                    // Draw the image with explicit dimensions
-                    ctx.drawImage(
-                        backgroundImg,
-                        0, 0, backgroundImg.naturalWidth, backgroundImg.naturalHeight, // Source rectangle
-                        drawX, drawY, drawWidth, drawHeight // Destination rectangle
-                    );
-
-                    // Add title if available
-                    if (state.videoTitle) {
-                        // Save context state
-                        ctx.save();
-
-                        // Set text properties
-                        ctx.fillStyle = 'white';
-                        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-                        ctx.shadowBlur = 20;
-                        ctx.textAlign = 'center';
-
-                        // Calculate font size based on canvas dimensions
-                        const fontSize = Math.floor(canvas.width / 12);
-                        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
-
-                        // Draw background for text
-                        const textWidth = ctx.measureText(state.videoTitle).width;
-                        const padding = fontSize * 1.2;
-                        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                        ctx.fillRect(
-                            (canvas.width - textWidth) / 2 - padding,
-                            canvas.height / 2 - fontSize - padding / 2,
-                            textWidth + padding * 2,
-                            fontSize * 2 + padding
-                        );
-
-                        // Draw text with stronger shadow
-                        ctx.shadowBlur = 30;
-                        ctx.shadowColor = 'rgba(0, 0, 0, 1)';
-                        ctx.fillStyle = 'white';
-                        ctx.fillText(state.videoTitle, canvas.width / 2, canvas.height / 2);
-
-                        // Restore context state
-                        ctx.restore();
-                    }
-
-                    // Create an image element from the canvas
-                    const startScreen = document.createElement('img');
-                    startScreen.className = 'start-screen';
-                    startScreen.src = canvas.toDataURL('image/png');
-                    startScreen.style.width = '100%';
-                    startScreen.style.height = '100%';
-                    startScreen.style.objectFit = 'cover';
-
-                    // Add to preview
-                    previewFrame.appendChild(startScreen);
-
-                } catch (e) {
-                    console.error("Error creating pre-rendered start screen for preview:", e);
-                    createFallbackStartScreen();
-                }
-            };
-
-            backgroundImg.onerror = () => {
-                console.error("Failed to load start screen background image for preview");
-                createFallbackStartScreen();
-            };
-
-            // Set the source to trigger loading
-            backgroundImg.src = state.startScreenImage;
-        };
-
-        // Create a fallback start screen if pre-rendering fails
-        const createFallbackStartScreen = () => {
-            // Create a basic start screen div
-            const startScreen = document.createElement('div');
-            startScreen.className = 'start-screen';
-            startScreen.style.backgroundImage = `url('${state.startScreenImage}')`;
-
-            // Add title if available
-            if (state.videoTitle) {
-                const titleElement = document.createElement('div');
-                titleElement.className = 'start-screen-title';
-                titleElement.textContent = state.videoTitle;
-                startScreen.appendChild(titleElement);
-            }
-
-            previewFrame.appendChild(startScreen);
-        };
-
-        // Start the pre-rendering process
-        preRenderStartScreen();
-
-        // If this is a start screen clip and we're playing, continue to show other elements
-        if (!(startScreenClip && state.isPlaying)) {
-            return;
+            // Add title to container
+            titleContainer.appendChild(titleElement);
+            previewFrame.appendChild(titleContainer);
         }
+
+        return;
+    }
+
+    // Check for clips at the beginning of the timeline (for start screen)
+    const startScreenClip = state.clips.find(clip => {
+        const startScreenItem = state.mediaItems.find(item => item.src === 'https://tiboindii.github.io/FAQmov/startscreen.png');
+        return clip.startTime === 0 &&
+               clip.mediaId === startScreenItem?.id &&
+               state.currentTime >= clip.startTime &&
+               state.currentTime < (clip.startTime + clip.duration);
+    });
+
+    // If a start screen clip is active and we're not playing, show it and return
+    if (startScreenClip && !state.isPlaying) {
+        // Import the start screen image if needed
+        const startScreenItem = importStartScreenImage();
+
+        // Create an image element for the start screen
+        const img = document.createElement('img');
+        img.src = startScreenItem.src; // This is the online URL
+        img.style.position = 'absolute';
+        img.style.width = '100%';
+        img.style.height = '100%';
+        img.style.objectFit = 'contain';
+        img.style.left = '0';
+        img.style.top = '0';
+        previewFrame.appendChild(img);
+
+        // Add title if available
+        if (state.videoTitle) {
+            // Create title container without background
+            const titleContainer = document.createElement('div');
+            titleContainer.className = 'title-container';
+            titleContainer.style.position = 'absolute';
+            titleContainer.style.top = '50%';
+            titleContainer.style.left = '50%';
+            titleContainer.style.transform = 'translate(-50%, -50%)';
+            titleContainer.style.padding = '20px 40px';
+            titleContainer.style.textAlign = 'center';
+
+            // Create title element with dark green text
+            const titleElement = document.createElement('div');
+            titleElement.className = 'start-screen-title';
+            titleElement.textContent = state.videoTitle;
+            titleElement.style.color = '#016362'; // Dark green color
+            titleElement.style.fontSize = '42px'; // Larger font size for better visibility
+            titleElement.style.fontWeight = 'bold';
+            titleElement.style.textShadow = '0 2px 4px rgba(255, 255, 255, 0.5)'; // Light shadow for contrast
+
+            // Add title to container
+            titleContainer.appendChild(titleElement);
+            previewFrame.appendChild(titleContainer);
+        }
+
+        return;
     }
 
     // Find clips that should be visible at current time
@@ -1690,30 +1941,61 @@ function updatePreview() {
         }
     });
 
-    // Add touch actions that should be visible at current time
-    const visibleTouchActions = state.touchActions.filter(action => {
-        return state.currentTime >= action.startTime &&
-               state.currentTime < (action.startTime + action.duration);
+    // Add highlight animations at the current time
+    const activeHighlights = state.highlights.filter(highlight => {
+        // Show highlights that are at the current time (with a larger tolerance)
+        const tolerance = 0.15; // 150ms tolerance (increased from 100ms)
+        return Math.abs(highlight.time - state.currentTime) < tolerance;
     });
 
-    // Add touch actions to preview
-    visibleTouchActions.forEach(action => {
-        const touchAction = document.createElement('div');
-        touchAction.className = 'touch-action';
-        touchAction.style.left = `${action.x}px`;
-        touchAction.style.top = `${action.y}px`;
+    // Add active highlights to preview
+    const previewContainer = document.querySelector('.preview-container');
 
-        // Create pulse animation
-        const pulse = document.createElement('div');
-        pulse.className = 'touch-pulse';
+    if (activeHighlights.length > 0) {
+        console.log(`Showing ${activeHighlights.length} highlights at time ${state.currentTime.toFixed(2)}`);
 
-        // Create center dot
-        const dot = document.createElement('div');
-        dot.className = 'touch-dot';
+        // Add highlight-active class to preview container
+        if (previewContainer) {
+            previewContainer.classList.add('highlight-active');
 
-        touchAction.appendChild(pulse);
-        touchAction.appendChild(dot);
-        previewFrame.appendChild(touchAction);
+            // Remove the class after the animation duration
+            setTimeout(() => {
+                previewContainer.classList.remove('highlight-active');
+            }, 2000); // Match the highlight animation duration
+        }
+    }
+
+    activeHighlights.forEach(highlight => {
+        // Create highlight animation element
+        const highlightElement = document.createElement('div');
+        highlightElement.className = 'highlight-animation';
+
+        // Position at the stored coordinates
+        highlightElement.style.left = `${highlight.x}%`;
+        highlightElement.style.top = `${highlight.y}%`;
+
+        // Add a TAP label to make it more visible
+        const label = document.createElement('span');
+        label.style.position = 'absolute';
+        label.style.top = '50%';
+        label.style.left = '50%';
+        label.style.transform = 'translate(-50%, -50%)';
+        label.style.color = 'white';
+        label.style.fontWeight = 'bold';
+        label.style.fontSize = '16px';
+        label.style.textShadow = '0 0 5px rgba(0,0,0,0.7)';
+        label.textContent = 'TAP';
+        highlightElement.appendChild(label);
+
+        // Add to preview frame
+        previewFrame.appendChild(highlightElement);
+
+        // Remove after animation completes
+        setTimeout(() => {
+            if (highlightElement.parentNode) {
+                highlightElement.parentNode.removeChild(highlightElement);
+            }
+        }, 2000); // Match the CSS animation duration (2s)
     });
 
     // Show empty state if no clips and playing past the start screen
@@ -1731,7 +2013,7 @@ function saveProject() {
     const projectData = {
         name: state.projectName,
         clips: state.clips,
-        touchActions: state.touchActions,
+        highlights: state.highlights,
         audioDuration: state.audioDuration,
         videoTitle: state.videoTitle,
         startScreenImage: state.startScreenImage,
@@ -1796,6 +2078,22 @@ function startExport() {
 
     const ctx = canvas.getContext('2d');
 
+    // Check if Web Workers are supported
+    const useWebWorker = window.Worker && window.OffscreenCanvas;
+    console.log(`Using Web Worker for export: ${useWebWorker}`);
+
+    // Create a worker if supported
+    let worker = null;
+    if (useWebWorker) {
+        try {
+            worker = new Worker('export-worker.js');
+            console.log('Export worker created successfully');
+        } catch (e) {
+            console.error('Failed to create export worker:', e);
+            worker = null;
+        }
+    }
+
     // Create a hidden video element to display the canvas recording
     const videoPreview = document.createElement('video');
     videoPreview.controls = true;
@@ -1807,8 +2105,14 @@ function startExport() {
 
     // Create an audio context for the export
     const exportAudioContext = new AudioContext();
+
+    // Note: We're using the state.audioBuffer directly which already has
+    // 3 seconds of silence at the beginning from the audio import process.
+    // This ensures the audio timing in the export matches the preview.
     const exportAudioSource = exportAudioContext.createBufferSource();
     exportAudioSource.buffer = state.audioBuffer;
+
+    console.log(`Export audio duration: ${state.audioBuffer.duration.toFixed(2)}s with 3s silence at start`);
 
     // Connect audio to the stream
     const audioDestination = exportAudioContext.createMediaStreamDestination();
@@ -2015,9 +2319,15 @@ function startExport() {
     const allImagePromises = [];
     const allImageElements = {};
 
-    // Create a map of all clips and touch actions by time for faster lookup
+    // For Web Worker, we need to store image data
+    const mediaItemsWithImageData = [];
+
+    // Create a map of all clips and highlights by time for faster lookup
     const clipsByTime = {};
-    const touchActionsByTime = {};
+    const highlightsByTime = {};
+
+    // Prepare start screen data for the worker
+    let startScreenData = null;
 
     // Use the exact audio duration for the export (locked to audio length)
     const exactDuration = state.audioDuration;
@@ -2028,27 +2338,44 @@ function startExport() {
 
     console.log(`Preparing to export ${frameCount} frames at ${frameRate} fps for ${state.audioDuration.toFixed(2)}s of audio`);
 
-    // Create a start screen with title - avoiding CORS issues with local files
+    // Load the startscreen.png file from the online URL and add title overlay
     const startScreenPromise = new Promise((resolve) => {
-        console.log("Creating start screen with title - avoiding CORS issues");
+        console.log("Loading startscreen.png from online URL and preparing title overlay");
 
-        // Create a canvas for the background
-        const backgroundCanvas = document.createElement('canvas');
-        backgroundCanvas.width = 1284;
-        backgroundCanvas.height = 2778;
-        const bgCtx = backgroundCanvas.getContext('2d');
+        // Import the start screen image to get the online URL
+        const startScreenItem = importStartScreenImage();
 
-        // Fill with the header color as the base
-        bgCtx.fillStyle = '#016362';
-        bgCtx.fillRect(0, 0, backgroundCanvas.width, backgroundCanvas.height);
-
-        // Create the background image
+        // Load the background image from the online URL
         const backgroundImg = new Image();
+        backgroundImg.crossOrigin = "anonymous"; // Important for CORS
+
         backgroundImg.onload = () => {
-            console.log(`Background image created: ${backgroundImg.width}x${backgroundImg.height}`);
+            console.log(`Startscreen.png loaded successfully from online URL: ${backgroundImg.width}x${backgroundImg.height}`);
 
             // Store the background image
             allImageElements['startScreenBackground'] = backgroundImg;
+            // Also store it with the media ID for use in clips
+            allImageElements[startScreenItem.id] = backgroundImg;
+
+            // For Web Worker, capture the start screen image data
+            if (useWebWorker) {
+                // Create a temporary canvas to get image data
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = backgroundImg.width;
+                tempCanvas.height = backgroundImg.height;
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCtx.drawImage(backgroundImg, 0, 0);
+
+                // Get image data as array buffer for transfer to worker
+                const imageData = tempCtx.getImageData(0, 0, backgroundImg.width, backgroundImg.height);
+
+                // Store start screen data for the worker
+                startScreenData = {
+                    width: backgroundImg.width,
+                    height: backgroundImg.height,
+                    imageData: imageData.data.buffer // ArrayBuffer for transferring
+                };
+            }
 
             // Create a separate title overlay if there's a title
             if (state.videoTitle) {
@@ -2065,30 +2392,20 @@ function startExport() {
                 titleCtx.save();
 
                 // Set text properties
-                titleCtx.fillStyle = 'white';
-                titleCtx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-                titleCtx.shadowBlur = 20;
                 titleCtx.textAlign = 'center';
 
                 // Calculate font size based on canvas dimensions
-                const fontSize = Math.floor(titleCanvas.width / 12);
+                const fontSize = Math.floor(titleCanvas.width / 10); // Larger font size for better visibility
                 titleCtx.font = `bold ${fontSize}px Arial, sans-serif`;
 
-                // Draw background for text
-                const textWidth = titleCtx.measureText(state.videoTitle).width;
-                const padding = fontSize * 1.2;
-                titleCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                titleCtx.fillRect(
-                    (titleCanvas.width - textWidth) / 2 - padding,
-                    titleCanvas.height / 2 - fontSize - padding / 2,
-                    textWidth + padding * 2,
-                    fontSize * 2 + padding
-                );
+                // Add shadow for better contrast
+                titleCtx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+                titleCtx.shadowBlur = 10;
+                titleCtx.shadowOffsetX = 2;
+                titleCtx.shadowOffsetY = 2;
 
-                // Draw text with stronger shadow
-                titleCtx.shadowBlur = 30;
-                titleCtx.shadowColor = 'rgba(0, 0, 0, 1)';
-                titleCtx.fillStyle = 'white';
+                // Draw the title text in dark green
+                titleCtx.fillStyle = '#016362'; // Dark green color
                 titleCtx.fillText(state.videoTitle, titleCanvas.width / 2, titleCanvas.height / 2);
 
                 // Restore context state
@@ -2103,7 +2420,7 @@ function startExport() {
                     resolve({ background: backgroundImg, title: titleImg });
                 };
 
-                // Set the source to trigger loading - using data URL to avoid CORS
+                // Set the source to trigger loading
                 titleImg.src = titleCanvas.toDataURL('image/png');
 
                 console.log(`Added title "${state.videoTitle}" as separate overlay`);
@@ -2113,8 +2430,73 @@ function startExport() {
             }
         };
 
-        // Set the source to trigger loading - using data URL to avoid CORS
-        backgroundImg.src = backgroundCanvas.toDataURL('image/png');
+        backgroundImg.onerror = (e) => {
+            console.error("Error loading startscreen.png from online URL:", e);
+
+            // Create a fallback image
+            const fallbackCanvas = document.createElement('canvas');
+            fallbackCanvas.width = 1284;
+            fallbackCanvas.height = 2778;
+            const fallbackCtx = fallbackCanvas.getContext('2d');
+
+            // Fill with the header color
+            fallbackCtx.fillStyle = '#016362';
+            fallbackCtx.fillRect(0, 0, fallbackCanvas.width, fallbackCanvas.height);
+
+            // Convert to image
+            const fallbackImg = new Image();
+            fallbackImg.onload = () => {
+                console.log("Using fallback for start screen background");
+                allImageElements['startScreenBackground'] = fallbackImg;
+                // Also store it with the media ID for use in clips
+                allImageElements[startScreenItem.id] = fallbackImg;
+
+                // Create title overlay if needed
+                if (state.videoTitle) {
+                    // Create a canvas for the title
+                    const titleCanvas = document.createElement('canvas');
+                    titleCanvas.width = 1284;
+                    titleCanvas.height = 2778;
+                    const titleCtx = titleCanvas.getContext('2d');
+
+                    // Clear the canvas
+                    titleCtx.clearRect(0, 0, titleCanvas.width, titleCanvas.height);
+
+                    // Set up text properties for dark green text
+                    titleCtx.textAlign = 'center';
+                    const fontSize = Math.floor(titleCanvas.width / 10); // Larger font size for better visibility
+                    titleCtx.font = `bold ${fontSize}px Arial, sans-serif`;
+
+                    // Add shadow for better contrast
+                    titleCtx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+                    titleCtx.shadowBlur = 10;
+                    titleCtx.shadowOffsetX = 2;
+                    titleCtx.shadowOffsetY = 2;
+
+                    // Draw the title text in dark green
+                    titleCtx.fillStyle = '#016362'; // Dark green color
+                    titleCtx.fillText(state.videoTitle, titleCanvas.width / 2, titleCanvas.height / 2);
+
+                    // Convert to image
+                    const titleImg = new Image();
+                    titleImg.onload = () => {
+                        console.log("Title overlay created for fallback");
+                        allImageElements['startScreenTitle'] = titleImg;
+                        resolve({ background: fallbackImg, title: titleImg });
+                    };
+
+                    titleImg.src = titleCanvas.toDataURL('image/png');
+                } else {
+                    // No title needed
+                    resolve({ background: fallbackImg, title: null });
+                }
+            };
+
+            fallbackImg.src = fallbackCanvas.toDataURL('image/png');
+        };
+
+        // Set the source to trigger loading - use the online URL
+        backgroundImg.src = startScreenItem.src; // This is the online URL
     });
 
     // Make sure we prioritize loading the start screen image
@@ -2137,12 +2519,38 @@ function startExport() {
         if (!allImageElements[mediaItem.id]) {
             console.log(`Preloading image for media item: ${mediaItem.name}`);
 
-            const promise = new Promise((resolve, reject) => {
+            const promise = new Promise((resolve) => {
                 const img = new Image();
                 img.crossOrigin = "anonymous"; // Add this to avoid CORS issues
 
                 img.onload = () => {
                     console.log(`Image loaded for ${mediaItem.name}: ${img.width}x${img.height}`);
+
+                    // Store the image element
+                    allImageElements[mediaItem.id] = img;
+
+                    // For Web Worker, we need to capture the image data
+                    if (useWebWorker) {
+                        // Create a temporary canvas to get image data
+                        const tempCanvas = document.createElement('canvas');
+                        tempCanvas.width = img.width;
+                        tempCanvas.height = img.height;
+                        const tempCtx = tempCanvas.getContext('2d');
+                        tempCtx.drawImage(img, 0, 0);
+
+                        // Get image data as array buffer for transfer to worker
+                        const imageData = tempCtx.getImageData(0, 0, img.width, img.height);
+
+                        // Store image data with media item
+                        mediaItemsWithImageData.push({
+                            id: mediaItem.id,
+                            name: mediaItem.name,
+                            width: img.width,
+                            height: img.height,
+                            imageData: imageData.data.buffer // ArrayBuffer for transferring
+                        });
+                    }
+
                     resolve(img);
                 };
 
@@ -2154,9 +2562,6 @@ function startExport() {
 
                 // Set the source to trigger loading
                 img.src = mediaItem.src;
-
-                // Store the image element
-                allImageElements[mediaItem.id] = img;
             });
 
             allImagePromises.push(promise);
@@ -2176,16 +2581,32 @@ function startExport() {
         }
     });
 
-    // Map touch actions to frames
-    state.touchActions.forEach(action => {
-        const startFrame = Math.floor(action.startTime * frameRate);
-        const endFrame = Math.ceil((action.startTime + action.duration) * frameRate);
+    // Map highlights to each frame they appear in
+    state.highlights.forEach(highlight => {
+        // Calculate the exact frame for this highlight
+        // Use Math.round to get the closest frame to the exact time
+        // Note: No need to add 3 seconds here as the highlight.time already includes the offset
+        // since it's based on the timeline which already has the 3-second offset
+        const exactFrame = Math.round(highlight.time * frameRate);
+
+        // Calculate the frame range for the animation duration
+        const startFrame = exactFrame;
+        const endFrame = Math.ceil((highlight.time + highlight.duration) * frameRate);
+
+        console.log(`Mapping highlight at exact frame ${exactFrame} (${highlight.time.toFixed(3)}s) with duration ${highlight.duration}s`);
 
         for (let frame = startFrame; frame < endFrame && frame < frameCount; frame++) {
-            if (!touchActionsByTime[frame]) {
-                touchActionsByTime[frame] = [];
+            if (!highlightsByTime[frame]) {
+                highlightsByTime[frame] = [];
             }
-            touchActionsByTime[frame].push(action);
+
+            // Store the exact frame number to calculate precise progress
+            const highlightWithExactFrame = {
+                ...highlight,
+                exactFrame: exactFrame
+            };
+
+            highlightsByTime[frame].push(highlightWithExactFrame);
         }
     });
 
@@ -2235,119 +2656,77 @@ function startExport() {
         // Calculate time for this frame
         const currentTime = frameNumber / frameRate;
 
+        // Log every second for debugging
+        if (frameNumber % frameRate === 0) {
+            console.log(`Rendering frame ${frameNumber} at time ${currentTime.toFixed(2)}s`);
+        }
+
         // Clear canvas with white background
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         // Show start screen for the first 60 frames (2 seconds at 30fps)
+        // Note: The first 3 seconds of audio are silent, with the first 2 seconds showing the start screen
         if (frameNumber < 60) { // Show for full 2 seconds to match the start screen clip
-            console.log(`Rendering start screen for frame ${frameNumber}`);
+            console.log(`Rendering start screen for frame ${frameNumber} (time: ${(frameNumber/frameRate).toFixed(2)}s)`);
 
-            // Use the separate background and title images
-            const backgroundImg = allImageElements['startScreenBackground'];
-            const titleImg = allImageElements['startScreenTitle'];
+            // Find the start screen media item
+            const startScreenItem = state.mediaItems.find(item => item.name === 'startscreen.webp' ||
+                                                                 item.name === 'startscreen.jpg' ||
+                                                                 item.name === 'startscreen.png');
 
             // First fill with a fallback color
             ctx.fillStyle = '#016362';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Draw the background image if available
-            if (backgroundImg && backgroundImg.complete && backgroundImg.naturalWidth > 0) {
-                console.log("Drawing startscreen.png background");
+            if (startScreenItem && allImageElements[startScreenItem.id]) {
+                // Use the image directly from the media item
+                const img = allImageElements[startScreenItem.id];
 
-                try {
-                    // Calculate dimensions to maintain aspect ratio (cover style)
-                    const imgAspect = backgroundImg.naturalWidth / backgroundImg.naturalHeight;
-                    const canvasAspect = canvas.width / canvas.height;
+                if (img && img.complete && img.naturalWidth > 0) {
+                    console.log("Drawing startscreen.png from online URL");
 
-                    let drawWidth, drawHeight, drawX, drawY;
-
-                    if (imgAspect > canvasAspect) {
-                        // Image is wider than canvas (relative to height)
-                        drawHeight = canvas.height;
-                        drawWidth = canvas.height * imgAspect;
-                        drawX = (canvas.width - drawWidth) / 2;
-                        drawY = 0;
-                    } else {
-                        // Image is taller than canvas (relative to width)
-                        drawWidth = canvas.width;
-                        drawHeight = canvas.width / imgAspect;
-                        drawX = 0;
-                        drawY = (canvas.height - drawHeight) / 2;
+                    try {
+                        // Draw the image using our helper function
+                        drawImageToCanvas(img, ctx, canvas.width, canvas.height);
+                        console.log("Start screen drawn successfully");
+                    } catch (e) {
+                        console.error("Error drawing start screen image:", e);
+                        // Fallback already applied (green background)
                     }
-
-                    // Draw the background image
-                    ctx.drawImage(
-                        backgroundImg,
-                        0, 0, backgroundImg.naturalWidth, backgroundImg.naturalHeight, // Source rectangle
-                        drawX, drawY, drawWidth, drawHeight // Destination rectangle
-                    );
-
-                    console.log(`Background drawn at ${drawX},${drawY} with size ${drawWidth}x${drawHeight}`);
-                } catch (e) {
-                    console.error("Error drawing background image:", e);
-                    // Fallback already applied (green background)
+                } else {
+                    console.log("Start screen image not fully loaded, using fallback color");
                 }
             } else {
-                console.log("Background image not available, using fallback color");
+                console.log("Start screen image not available, using fallback color");
             }
 
-            // Draw the title overlay if available
-            if (titleImg && titleImg.complete && titleImg.naturalWidth > 0) {
-                console.log("Drawing title overlay");
+            // Add title if available
+            if (state.videoTitle) {
+                console.log("Adding title overlay to start screen");
 
-                try {
-                    // Draw the title overlay
-                    ctx.drawImage(titleImg, 0, 0, canvas.width, canvas.height);
-                    console.log("Title overlay drawn successfully");
-                } catch (e) {
-                    console.error("Error drawing title overlay:", e);
-
-                    // Fallback: draw title text directly
-                    if (state.videoTitle) {
-                        // Draw a semi-transparent background for the title
-                        const fontSize = Math.floor(canvas.width / 12);
-                        ctx.font = `bold ${fontSize}px Arial, sans-serif`;
-
-                        const textWidth = ctx.measureText(state.videoTitle).width;
-                        const padding = fontSize * 1.2;
-
-                        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                        ctx.fillRect(
-                            (canvas.width - textWidth) / 2 - padding,
-                            canvas.height / 2 - fontSize - padding / 2,
-                            textWidth + padding * 2,
-                            fontSize * 2 + padding
-                        );
-
-                        // Draw the title text
-                        ctx.fillStyle = 'white';
-                        ctx.textAlign = 'center';
-                        ctx.fillText(state.videoTitle, canvas.width / 2, canvas.height / 2);
-                    }
-                }
-            } else if (state.videoTitle) {
-                console.log("Title overlay not available, drawing title text directly");
-
-                // Draw a semi-transparent background for the title
-                const fontSize = Math.floor(canvas.width / 12);
+                // Set up text properties for dark green text
+                const fontSize = Math.floor(canvas.width / 10); // Larger font size for better visibility
                 ctx.font = `bold ${fontSize}px Arial, sans-serif`;
-
-                const textWidth = ctx.measureText(state.videoTitle).width;
-                const padding = fontSize * 1.2;
-
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-                ctx.fillRect(
-                    (canvas.width - textWidth) / 2 - padding,
-                    canvas.height / 2 - fontSize - padding / 2,
-                    textWidth + padding * 2,
-                    fontSize * 2 + padding
-                );
-
-                // Draw the title text
-                ctx.fillStyle = 'white';
                 ctx.textAlign = 'center';
+
+                // Add shadow for better contrast
+                ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+                ctx.shadowBlur = 10;
+                ctx.shadowOffsetX = 2;
+                ctx.shadowOffsetY = 2;
+
+                // Draw the title text in dark green
+                ctx.fillStyle = '#016362'; // Dark green color
                 ctx.fillText(state.videoTitle, canvas.width / 2, canvas.height / 2);
+
+                // Reset shadow
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+
+                console.log("Title overlay added successfully");
             }
 
             // Update progress and return
@@ -2404,17 +2783,32 @@ function startExport() {
 
         console.log(`Drew ${drawnImages} images for frame ${frameNumber}`);
 
-        // Draw touch actions for this frame
-        const touchActions = touchActionsByTime[frameNumber] || [];
-        touchActions.forEach(action => {
-            // Calculate animation progress (0 to 1)
-            const actionStartFrame = Math.floor(action.startTime * frameRate);
-            const actionProgress = (frameNumber - actionStartFrame) / (action.duration * frameRate);
+        // Draw highlights for this frame
+        const activeHighlights = highlightsByTime[frameNumber] || [];
+        if (activeHighlights.length > 0) {
+            console.log(`Drawing ${activeHighlights.length} highlights for frame ${frameNumber}`);
 
-            // Draw touch action
-            console.log(`Drawing touch action at (${action.x}, ${action.y}) with progress ${actionProgress.toFixed(2)}`);
-            drawTouchAction(ctx, action.x, action.y, actionProgress);
-        });
+            // Save context state
+            ctx.save();
+
+            // Draw each highlight
+            activeHighlights.forEach(highlight => {
+                // Calculate animation progress (0 to 1) using the exact frame
+                const exactStartFrame = highlight.exactFrame; // Use the stored exact frame
+                const highlightProgress = (frameNumber - exactStartFrame) / (highlight.duration * frameRate);
+
+                // Ensure progress is between 0 and 1
+                const clampedProgress = Math.max(0, Math.min(1, highlightProgress));
+
+                console.log(`Drawing highlight at frame ${frameNumber}, time ${currentTime.toFixed(3)}s, exact start: ${exactStartFrame} (${(exactStartFrame/frameRate).toFixed(3)}s), progress: ${clampedProgress.toFixed(3)}`);
+
+                // Draw the highlight pulse
+                drawHighlightPulse(ctx, highlight.x / 100 * canvas.width, highlight.y / 100 * canvas.height, clampedProgress);
+            });
+
+            // Restore context state
+            ctx.restore();
+        }
 
         // Update progress in the modal
         const progress = (frameNumber / frameCount) * 100;
@@ -2424,36 +2818,53 @@ function startExport() {
     // Note: The drawVideoTitle function has been removed as we now pre-render the title
     // directly into the start screen image for better reliability
 
-    // Helper function to draw a touch action on the canvas
-    function drawTouchAction(ctx, x, y, progress) {
-        // Set up the touch action style
-        ctx.save();
+    // Draw a highlight pulse animation
+    function drawHighlightPulse(ctx, x, y, progress) {
+        // Use a more precise animation curve that matches the CSS animation
+        // This ensures the exported video animation matches what users see in the preview
 
-        // Set global alpha for 50% transparency
-        ctx.globalAlpha = 0.5;
+        // Calculate size based on progress (0 to 1)
+        // Start at 0.5x size, grow to 3.5x size (matching CSS animation)
+        const maxRadius = 250; // Maximum radius in pixels
 
-        // Draw the outer pulse circle
-        const maxRadius = 250; // Increased by another 250% from 100
-        const radius = maxRadius * (progress * 1.5); // Increased zoom-out size
+        // Use a cubic ease-out function for smoother animation
+        // This better matches the CSS ease-out timing
+        const easedProgress = 1 - Math.pow(1 - progress, 3);
 
-        // Create gradient for pulse
-        const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-        gradient.addColorStop(0, 'rgba(255, 0, 0, 0.8)'); // Changed to red
-        gradient.addColorStop(1, 'rgba(255, 0, 0, 0)'); // Changed to red
+        // Scale from 0.5 to 3.5 (matching the CSS keyframes)
+        const scale = 0.5 + (easedProgress * 3.0);
+        const radius = maxRadius * scale / 3.5; // Normalize to match CSS scale
 
-        // Draw pulse circle
+        // Calculate opacity based on progress (start at 0.9, fade to 0)
+        // Use a linear fade for opacity
+        const opacity = Math.max(0, 0.9 - progress * 0.9);
+
+        // Draw outer glow
+        const gradient = ctx.createRadialGradient(x, y, radius * 0.7, x, y, radius);
+        gradient.addColorStop(0, `rgba(1, 99, 98, ${opacity * 0.8})`); // Dark green color
+        gradient.addColorStop(1, `rgba(1, 99, 98, 0)`);
+
+        ctx.fillStyle = gradient;
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = gradient;
         ctx.fill();
 
-        // Draw center dot
+        // Draw inner circle with white border
+        ctx.fillStyle = `rgba(1, 99, 98, ${opacity * 0.9})`; // Dark green color
+        ctx.strokeStyle = `rgba(255, 255, 255, ${opacity * 0.9})`;
+        ctx.lineWidth = 3;
+
         ctx.beginPath();
-        ctx.arc(x, y, 62.5, 0, Math.PI * 2); // Increased by another 250% from 25
-        ctx.fillStyle = '#ff0000'; // Changed to red
+        ctx.arc(x, y, radius * 0.4, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
 
-        ctx.restore();
+        // Add "TAP" text
+        ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+        ctx.font = 'bold 24px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('TAP', x, y);
     }
 
     // Helper function to draw images with proper aspect ratio
@@ -2519,22 +2930,120 @@ function startExport() {
 
     // Render frames sequentially
     function renderNextFrame(frameNumber) {
-        // Render the current frame
-        renderFrame(frameNumber);
+        if (useWebWorker && worker) {
+            // Use Web Worker for rendering
+            if (frameNumber === 0) {
+                // Initialize the worker with export settings
+                worker.postMessage({
+                    type: 'init',
+                    data: {
+                        frameCount: frameCount,
+                        frameRate: frameRate,
+                        canvasWidth: canvas.width,
+                        canvasHeight: canvas.height
+                    }
+                });
 
-        // Schedule the next frame or finish
-        if (frameNumber < frameCount) {
-            // Use setTimeout to ensure consistent frame timing
-            setTimeout(() => {
-                renderNextFrame(frameNumber + 1);
-            }, frameDuration);
+                // Set up message handler for worker responses
+                worker.onmessage = function(e) {
+                    const { type, frameNumber, imageData, progress } = e.data;
+
+                    switch (type) {
+                        case 'initialized':
+                            console.log('Worker initialized, starting frame rendering');
+                            // Start rendering the first frame
+                            requestAnimationFrame(() => {
+                                renderNextFrameWithWorker(0);
+                            });
+                            break;
+
+                        case 'frameRendered':
+                            // Draw the rendered frame to the canvas
+                            const imageDataObj = new ImageData(
+                                new Uint8ClampedArray(imageData),
+                                canvas.width,
+                                canvas.height
+                            );
+                            ctx.putImageData(imageDataObj, 0, 0);
+
+                            // Update progress
+                            updateExportProgress(Math.min(100, progress));
+
+                            // Schedule the next frame or finish
+                            if (frameNumber < frameCount - 1) {
+                                // Use requestAnimationFrame for better performance
+                                requestAnimationFrame(() => {
+                                    renderNextFrameWithWorker(frameNumber + 1);
+                                });
+                            } else {
+                                // Stop recording when done
+                                console.log('All frames rendered, stopping recording');
+                                setTimeout(() => {
+                                    recorder.stop();
+                                    exportAudioSource.stop();
+                                    hideExportModal();
+
+                                    // Terminate the worker
+                                    worker.postMessage({ type: 'terminate' });
+                                }, 1000); // Give a second to ensure all frames are captured
+                            }
+                            break;
+                    }
+                };
+
+                // Handle worker errors
+                worker.onerror = function(e) {
+                    console.error('Worker error:', e);
+                    alert('Error during export. Falling back to standard rendering.');
+
+                    // Fall back to standard rendering
+                    useWebWorker = false;
+                    renderNextFrame(frameNumber);
+                };
+            }
+
+            // Function to render a frame using the worker
+            function renderNextFrameWithWorker(frameNum) {
+                // Prepare transfer list for ArrayBuffers
+                const transferList = [];
+
+                // Collect all ArrayBuffers that need to be transferred
+                if (frameNum === 0 && startScreenData) {
+                    transferList.push(startScreenData.imageData);
+                }
+
+                // Send the frame data to the worker
+                worker.postMessage({
+                    type: 'renderFrame',
+                    data: {
+                        frameNumber: frameNum,
+                        startScreenData: startScreenData,
+                        clipsByTime: clipsByTime,
+                        highlightsByTime: highlightsByTime,
+                        mediaItems: mediaItemsWithImageData,
+                        videoTitle: state.videoTitle
+                    }
+                }, transferList);
+            }
         } else {
-            // Stop recording when done
-            setTimeout(() => {
-                recorder.stop();
-                exportAudioSource.stop();
-                hideExportModal();
-            }, 1000); // Give a second to ensure all frames are captured
+            // Standard rendering without Web Worker
+            // Render the current frame
+            renderFrame(frameNumber);
+
+            // Schedule the next frame or finish
+            if (frameNumber < frameCount) {
+                // Use setTimeout to ensure consistent frame timing
+                setTimeout(() => {
+                    renderNextFrame(frameNumber + 1);
+                }, frameDuration);
+            } else {
+                // Stop recording when done
+                setTimeout(() => {
+                    recorder.stop();
+                    exportAudioSource.stop();
+                    hideExportModal();
+                }, 1000); // Give a second to ensure all frames are captured
+            }
         }
     }
 }
@@ -2657,6 +3166,13 @@ function showExportModal() {
         formatInfo.className = 'export-format-info';
         formatInfo.textContent = `Format: ${state.exportFormat.toUpperCase()}`;
 
+        // Add info about background processing
+        const backgroundInfo = document.createElement('p');
+        backgroundInfo.className = 'background-info';
+        backgroundInfo.innerHTML = useWebWorker ?
+            'Export is running in the background. You can continue using the app while it processes.' :
+            'Export is processing. Please wait until it completes.';
+
         const progressContainer = document.createElement('div');
         progressContainer.className = 'progress-container';
 
@@ -2674,6 +3190,7 @@ function showExportModal() {
 
         modalContent.appendChild(title);
         modalContent.appendChild(formatInfo);
+        modalContent.appendChild(backgroundInfo);
         modalContent.appendChild(progressContainer);
         modal.appendChild(modalContent);
 
@@ -2814,239 +3331,218 @@ function confirmNewProject() {
     }
 }
 
-// Track the last time a touch action was added
-let lastTouchActionTime = 0;
-const touchActionCooldown = 300; // 300ms cooldown between touch actions
-let touchReadyTimeout = null;
+// Handle spacebar press to add highlight markers
+function handleSpacebarForHighlight(event) {
+    // Only respond to spacebar key (key code 32)
+    if (event.keyCode !== 32 && event.key !== ' ') {
+        return;
+    }
 
-// Handle click on preview frame to add touch action
-function handlePreviewClick(event) {
-    // Only add touch actions when playing
+    // Prevent default spacebar action (which might scroll the page)
+    event.preventDefault();
+
+    // Only add highlights if audio is loaded (now works in both playing and paused states)
+    if (!state.audioBuffer) {
+        updateStatus('Import audio before adding highlights');
+        return;
+    }
+
+    // If paused, show a different status message
     if (!state.isPlaying) {
-        updateStatus('Start playback to add touch actions');
-        return;
-    }
-
-    // Get the preview container
-    const previewContainer = document.querySelector('.preview-container');
-
-    // Check if enough time has passed since the last touch action
-    const now = Date.now();
-    if (now - lastTouchActionTime < touchActionCooldown) {
-        console.log(`Touch action cooldown active. Wait ${touchActionCooldown}ms between actions.`);
-        updateStatus(`Touch action cooldown active (${Math.ceil((touchActionCooldown - (now - lastTouchActionTime)) / 100) / 10}s)`);
-
-        // Remove the touch-ready class during cooldown
-        if (previewContainer) {
-            previewContainer.classList.remove('touch-ready');
+        // Check if we're at the start screen (time 0)
+        if (state.currentTime === 0) {
+            updateStatus('Move timeline position before adding highlights');
+            return;
         }
-
-        // Clear any existing timeout
-        if (touchReadyTimeout) {
-            clearTimeout(touchReadyTimeout);
-        }
-
-        // Set a timeout to add the touch-ready class when cooldown is over
-        touchReadyTimeout = setTimeout(() => {
-            if (previewContainer && state.isPlaying) {
-                previewContainer.classList.add('touch-ready');
-                updateStatus('Ready for touch actions');
-            }
-        }, touchActionCooldown - (now - lastTouchActionTime));
-
-        return;
     }
 
-    // Update the last touch action time
-    lastTouchActionTime = now;
+    // Use the current mouse position for the highlight position
+    // (state.mouseX and state.mouseY are updated by the trackMousePositionInPreview function)
 
-    // Remove the touch-ready class during cooldown
-    if (previewContainer) {
-        previewContainer.classList.remove('touch-ready');
-
-        // Set a timeout to add the touch-ready class when cooldown is over
-        if (touchReadyTimeout) {
-            clearTimeout(touchReadyTimeout);
-        }
-
-        touchReadyTimeout = setTimeout(() => {
-            if (previewContainer && state.isPlaying) {
-                previewContainer.classList.add('touch-ready');
-                updateStatus('Ready for touch actions');
-            }
-        }, touchActionCooldown);
-    }
-
-    // Get click position relative to the preview frame
-    const rect = previewFrame.getBoundingClientRect();
-
-    // Calculate position considering the scale
-    const x = (event.clientX - rect.left) / state.previewScale;
-    const y = (event.clientY - rect.top) / state.previewScale;
-
-    // Add touch action at current time and position
-    addTouchAction(x, y, state.currentTime);
-}
-
-// Add touch action at specified position and time
-function addTouchAction(x, y, startTime) {
-    // Check if audio is loaded
-    if (!state.audioBuffer || !state.audioDuration) {
-        updateStatus('Please import audio before adding touch actions');
-        return;
-    }
-
-    // Default touch action duration
-    const defaultDuration = 1.5; // 1.5 seconds duration for touch animation
-
-    // Check if the touch action would extend beyond the audio duration
-    if (startTime >= state.audioDuration) {
-        updateStatus('Cannot add touch action beyond the end of audio');
-        return;
-    }
-
-    // Adjust duration if it would extend beyond the audio duration
-    const adjustedDuration = Math.min(defaultDuration, state.audioDuration - startTime);
-
-    // Create new touch action
-    const touchAction = {
+    // Create a new highlight at the current time
+    const newHighlight = {
         id: generateId(),
-        x: x,
-        y: y,
-        startTime: startTime,
-        duration: adjustedDuration, // Adjusted duration to fit within audio length
-        track: 'touch'
+        time: state.currentTime,
+        x: state.mouseX,
+        y: state.mouseY,
+        duration: 2.0 // Duration of the highlight animation in seconds
     };
 
-    // Add to state
-    state.touchActions.push(touchAction);
+    // Add to highlights array
+    state.highlights.push(newHighlight);
 
-    // Add to timeline
-    addTouchActionToTimeline(touchAction);
+    // Create highlight marker in timeline
+    createHighlightMarker(newHighlight);
 
-    // Update preview
-    updatePreview();
+    // Show a temporary highlight animation in the preview
+    showHighlightAnimation(newHighlight);
 
-    updateStatus('Touch action added');
+    updateStatus(`Highlight added at ${formatTime(state.currentTime)}`);
 }
 
-// This function has been removed as the +Touch button is no longer needed
-// Touch actions are now added directly by clicking on the preview during playback
+// Create a highlight marker in the timeline
+function createHighlightMarker(highlight) {
+    // Create marker element
+    const markerElement = document.createElement('div');
+    markerElement.className = 'highlight-marker';
+    markerElement.setAttribute('data-id', highlight.id);
 
-// Add touch action to timeline
-function addTouchActionToTimeline(touchAction) {
-    // Create clip element
-    const clip = document.createElement('div');
-    clip.className = 'clip touch-action-clip';
-    clip.dataset.id = touchAction.id;
-    clip.dataset.track = 'touch';
-    clip.draggable = true; // Make it draggable
+    // Position the marker
+    markerElement.style.left = `${highlight.time * state.timelineScale}px`;
 
-    // Position and size based on time - ensure exact positioning
-    // Position consistently with image clips (80px offset is added by the track)
-    clip.style.left = `${touchAction.startTime * state.timelineScale}px`;
-    clip.style.width = `${touchAction.duration * state.timelineScale}px`;
+    // Add label with time
+    const timeLabel = document.createElement('div');
+    timeLabel.className = 'highlight-time';
+    timeLabel.textContent = formatTime(highlight.time);
+    markerElement.appendChild(timeLabel);
 
-    // Ensure consistent background color
-    clip.style.backgroundColor = '#ff0000';
-    clip.style.height = '80%';
-    clip.style.marginTop = '5px';
-    clip.style.overflow = 'visible'; // Make sure content is visible
-    clip.style.cursor = 'grab'; // Change cursor to indicate it's draggable
+    // Add delete button
+    const deleteButton = document.createElement('div');
+    deleteButton.className = 'highlight-delete-btn';
+    deleteButton.innerHTML = '×';
+    deleteButton.title = 'Remove highlight';
+    markerElement.appendChild(deleteButton);
 
-    // Create label container with proper class
-    const labelContainer = document.createElement('div');
-    labelContainer.className = 'label-container';
+    // Add to highlight track
+    highlightTrack.appendChild(markerElement);
 
-    // Add touch icon and label with proper class
-    const touchLabel = document.createElement('span');
-    touchLabel.className = 'touch-label';
-    touchLabel.textContent = 'Touch';
-
-    // Add position info with proper class
-    const posInfo = document.createElement('span');
-    posInfo.className = 'pos-info';
-    posInfo.textContent = `${formatTime(touchAction.startTime)}`; // Simplified format
-    posInfo.style.display = 'inline-block';
-    posInfo.style.visibility = 'visible';
-    posInfo.style.color = 'white';
-    posInfo.style.fontWeight = 'bold';
-
-    // Assemble the label container
-    labelContainer.appendChild(touchLabel);
-    labelContainer.appendChild(posInfo);
-    clip.appendChild(labelContainer);
-
-    // Add delete button with improved styling
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'touch-remove-btn';
-    deleteBtn.innerHTML = '✕';
-    deleteBtn.title = 'Remove touch action';
-
-    // Add event listener for the delete button
-    deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        removeTouchAction(touchAction.id);
-    });
-
-    // Append the delete button to the clip
-    clip.appendChild(deleteBtn);
-
-    // Add to touch track
-    touchTrack.appendChild(clip);
-
-    // Set up drag and drop functionality
-    clip.addEventListener('mousedown', handleTouchActionMouseDown);
-
-    // Log for debugging
-    console.log(`Added touch action at ${formatTime(touchAction.startTime)}, position: ${touchAction.x.toFixed(0)},${touchAction.y.toFixed(0)}`);
+    // Set up event listeners
+    markerElement.addEventListener('mousedown', handleHighlightMouseDown);
+    deleteButton.addEventListener('click', handleHighlightDelete);
 }
 
-// Handle mouse down on a touch action clip
-function handleTouchActionMouseDown(event) {
+// Handle mouse down on a highlight marker
+function handleHighlightMouseDown(event) {
     // Ignore if it's the delete button
-    if (event.target.classList.contains('touch-remove-btn')) return;
+    if (event.target.classList.contains('highlight-delete-btn')) return;
 
-    const clipElement = event.currentTarget;
-    const clipId = clipElement.getAttribute('data-id');
+    const markerElement = event.currentTarget;
+    const highlightId = markerElement.getAttribute('data-id');
 
-    // Find the touch action in state
-    const touchAction = state.touchActions.find(action => action.id === clipId);
-    if (!touchAction) return;
+    // Find the highlight
+    const highlight = state.highlights.find(h => h.id === highlightId);
+    if (!highlight) return;
 
-    // Set as selected touch action
-    state.selectedTouchAction = touchAction;
+    // Set as selected highlight
+    selectHighlight(highlightId);
 
     // Start dragging
-    state.isDraggingTouchAction = true;
+    state.isDraggingHighlight = true;
     state.dragStartX = event.clientX;
-    state.originalLeft = parseInt(clipElement.style.left, 10) || 0;
+    state.originalLeft = parseInt(markerElement.style.left, 10) || 0;
 
-    // Change cursor to indicate active dragging
-    clipElement.style.cursor = 'grabbing';
-
-    // Add selected class for visual feedback
-    clipElement.classList.add('selected');
+    // Change cursor
+    markerElement.style.cursor = 'grabbing';
 
     event.stopPropagation();
 }
 
-// Remove touch action
-function removeTouchAction(id) {
-    // Remove from state
-    state.touchActions = state.touchActions.filter(action => action.id !== id);
-
-    // Remove from timeline
-    const clip = document.querySelector(`.clip[data-id="${id}"]`);
-    if (clip) {
-        clip.remove();
+// Select a highlight
+function selectHighlight(highlightId) {
+    // Deselect previous highlight
+    if (state.selectedHighlight) {
+        const prevElement = document.querySelector(`.highlight-marker[data-id="${state.selectedHighlight.id}"]`);
+        if (prevElement) {
+            prevElement.classList.remove('selected');
+        }
     }
 
-    // Update preview
-    updatePreview();
+    // Find and select new highlight
+    const highlight = state.highlights.find(h => h.id === highlightId);
+    if (highlight) {
+        state.selectedHighlight = highlight;
 
-    updateStatus('Touch action removed');
+        // Add selected class
+        const element = document.querySelector(`.highlight-marker[data-id="${highlightId}"]`);
+        if (element) {
+            element.classList.add('selected');
+        }
+    }
+}
+
+// Handle highlight delete button click
+function handleHighlightDelete(event) {
+    event.stopPropagation();
+
+    // Get the marker element and ID
+    const markerElement = event.target.parentElement;
+    const highlightId = markerElement.getAttribute('data-id');
+
+    // Remove from highlights array
+    const highlightIndex = state.highlights.findIndex(h => h.id === highlightId);
+    if (highlightIndex !== -1) {
+        state.highlights.splice(highlightIndex, 1);
+    }
+
+    // Remove from DOM
+    markerElement.remove();
+
+    // Deselect if this was the selected highlight
+    if (state.selectedHighlight && state.selectedHighlight.id === highlightId) {
+        state.selectedHighlight = null;
+    }
+
+    updateStatus('Highlight removed');
+}
+
+// Show a temporary highlight animation in the preview
+function showHighlightAnimation(highlight) {
+    // Create highlight element
+    const highlightElement = document.createElement('div');
+    highlightElement.className = 'highlight-animation';
+
+    // Position at the click coordinates
+    highlightElement.style.left = `${highlight.x}%`;
+    highlightElement.style.top = `${highlight.y}%`;
+
+    // Add a label to make it more visible during testing
+    const label = document.createElement('span');
+    label.style.position = 'absolute';
+    label.style.top = '50%';
+    label.style.left = '50%';
+    label.style.transform = 'translate(-50%, -50%)';
+    label.style.color = 'white';
+    label.style.fontWeight = 'bold';
+    label.style.fontSize = '16px';
+    label.style.textShadow = '0 0 5px rgba(0,0,0,0.7)';
+    label.textContent = 'TAP';
+    highlightElement.appendChild(label);
+
+    // Add to preview frame
+    previewFrame.appendChild(highlightElement);
+
+    // Remove after animation completes
+    setTimeout(() => {
+        if (highlightElement.parentNode) {
+            highlightElement.parentNode.removeChild(highlightElement);
+        }
+    }, 2000); // Match the CSS animation duration (2s)
+}
+
+// Handle project import
+function handleProjectImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Check if file is a project file (.indii)
+    if (file.name.endsWith('.indii')) {
+        // Confirm if there are unsaved changes
+        if (state.clips.length > 0 || state.highlights.length > 0) {
+            if (!confirm('Loading a project will replace your current work. Continue?')) {
+                // Reset input
+                event.target.value = '';
+                return;
+            }
+        }
+
+        // Load the project
+        loadProject(file);
+    } else {
+        alert('Please select a valid project file (.indii)');
+    }
+
+    // Reset input
+    event.target.value = '';
 }
 
 // Update status message
@@ -3057,6 +3553,108 @@ function updateStatus(message) {
 // Generate a unique ID
 function generateId() {
     return Math.random().toString(36).substring(2, 11);
+}
+
+// Load project from file
+function loadProject(file) {
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+        try {
+            // Parse project data
+            const projectData = JSON.parse(e.target.result);
+
+            // Reset current state
+            state.clips = [];
+            state.highlights = [];
+            state.mediaItems = [];
+            state.audioFile = null;
+            state.audioBuffer = null;
+            state.audioDuration = 0;
+            state.currentTime = 0;
+
+            // Clear UI elements
+            mediaLibrary.innerHTML = '';
+            imageTrack.innerHTML = '';
+            highlightTrack.innerHTML = '';
+            audioTrack.innerHTML = '<div class="empty-track">Import audio to create timeline</div>';
+
+            // Update project name
+            state.projectName = projectData.name || 'Imported Project';
+
+            // Update video title
+            state.videoTitle = projectData.videoTitle || '';
+            if (videoTitleInput) {
+                videoTitleInput.value = state.videoTitle;
+            }
+
+            // Load media items
+            if (projectData.mediaItems && Array.isArray(projectData.mediaItems)) {
+                projectData.mediaItems.forEach(item => {
+                    state.mediaItems.push(item);
+                    addMediaItemToLibrary(item);
+                });
+            }
+
+            // Load audio file
+            if (projectData.audioFile) {
+                state.audioFile = projectData.audioFile;
+                processAudioFile(projectData.audioFile.src);
+            }
+
+            // Load clips after audio is processed
+            const loadClipsAndHighlights = () => {
+                // Load clips
+                if (projectData.clips && Array.isArray(projectData.clips)) {
+                    projectData.clips.forEach(clip => {
+                        state.clips.push(clip);
+                        createClipElement(clip);
+                    });
+                }
+
+                // Load highlights
+                if (projectData.highlights && Array.isArray(projectData.highlights)) {
+                    projectData.highlights.forEach(highlight => {
+                        state.highlights.push(highlight);
+                        createHighlightMarker(highlight);
+                    });
+                }
+
+                // Update timeline width
+                updateTimelineWidth();
+
+                // Update preview
+                updatePreview();
+
+                updateStatus('Project loaded successfully');
+            };
+
+            // If audio is being processed, wait for it to complete
+            if (projectData.audioFile) {
+                const checkAudioLoaded = () => {
+                    if (state.audioBuffer) {
+                        loadClipsAndHighlights();
+                    } else {
+                        setTimeout(checkAudioLoaded, 100);
+                    }
+                };
+                checkAudioLoaded();
+            } else {
+                loadClipsAndHighlights();
+            }
+        } catch (error) {
+            console.error('Error loading project:', error);
+            alert('Error loading project. The file may be corrupted or in an invalid format.');
+            updateStatus('Error loading project');
+        }
+    };
+
+    reader.onerror = function() {
+        alert('Error reading project file');
+        updateStatus('Error reading project file');
+    };
+
+    reader.readAsText(file);
 }
 
 // Initialize the application when the DOM is loaded
