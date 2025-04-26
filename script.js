@@ -2360,7 +2360,7 @@ function startExport() {
             allImageElements[startScreenItem.id] = backgroundImg;
 
             // For Web Worker, capture the start screen image data
-            if (useWebWorker) {
+            if (state.useWebWorker) {
                 // Create a temporary canvas to get image data
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width = backgroundImg.width;
@@ -2999,7 +2999,7 @@ function startExport() {
                     alert('Error during export. Falling back to standard rendering.');
 
                     // Fall back to standard rendering
-                    useWebWorker = false;
+                    state.useWebWorker = false;
                     renderNextFrame(frameNumber);
                 };
             }
