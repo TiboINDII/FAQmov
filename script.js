@@ -64,7 +64,8 @@ const state = {
     exportFormat: 'avi', // Default export format
     highlightColor: '#016362', // Dark green color for highlight pulse animations
     mouseX: 50, // Current mouse X position in preview (percentage)
-    mouseY: 50  // Current mouse Y position in preview (percentage)
+    mouseY: 50,  // Current mouse Y position in preview (percentage)
+    useWebWorker: false // Whether to use Web Worker for export (will be set based on browser support)
 };
 
 // Initialize the application
@@ -2079,18 +2080,19 @@ function startExport() {
     const ctx = canvas.getContext('2d');
 
     // Check if Web Workers are supported
-    const useWebWorker = window.Worker && window.OffscreenCanvas;
-    console.log(`Using Web Worker for export: ${useWebWorker}`);
+    state.useWebWorker = window.Worker && window.OffscreenCanvas;
+    console.log(`Using Web Worker for export: ${state.useWebWorker}`);
 
     // Create a worker if supported
     let worker = null;
-    if (useWebWorker) {
+    if (state.useWebWorker) {
         try {
             worker = new Worker('export-worker.js');
             console.log('Export worker created successfully');
         } catch (e) {
             console.error('Failed to create export worker:', e);
             worker = null;
+            state.useWebWorker = false; // Fall back to standard rendering
         }
     }
 
@@ -2530,7 +2532,7 @@ function startExport() {
                     allImageElements[mediaItem.id] = img;
 
                     // For Web Worker, we need to capture the image data
-                    if (useWebWorker) {
+                    if (state.useWebWorker) {
                         // Create a temporary canvas to get image data
                         const tempCanvas = document.createElement('canvas');
                         tempCanvas.width = img.width;
@@ -2930,7 +2932,7 @@ function startExport() {
 
     // Render frames sequentially
     function renderNextFrame(frameNumber) {
-        if (useWebWorker && worker) {
+        if (state.useWebWorker && worker) {
             // Use Web Worker for rendering
             if (frameNumber === 0) {
                 // Initialize the worker with export settings
@@ -3169,7 +3171,7 @@ function showExportModal() {
         // Add info about background processing
         const backgroundInfo = document.createElement('p');
         backgroundInfo.className = 'background-info';
-        backgroundInfo.innerHTML = useWebWorker ?
+        backgroundInfo.innerHTML = state.useWebWorker ?
             'Export is running in the background. You can continue using the app while it processes.' :
             'Export is processing. Please wait until it completes.';
 
