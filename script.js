@@ -64,8 +64,7 @@ const state = {
     exportFormat: 'avi', // Default export format
     highlightColor: '#016362', // Dark green color for highlight pulse animations
     mouseX: 50, // Current mouse X position in preview (percentage)
-    mouseY: 50,  // Current mouse Y position in preview (percentage)
-    useWebWorker: false // Whether to use Web Worker for export (will be set based on browser support)
+    mouseY: 50  // Current mouse Y position in preview (percentage)
 };
 
 // Initialize the application
@@ -2079,23 +2078,6 @@ function startExport() {
 
     const ctx = canvas.getContext('2d');
 
-    // Check if Web Workers are supported
-    state.useWebWorker = window.Worker && window.OffscreenCanvas;
-    console.log(`Using Web Worker for export: ${state.useWebWorker}`);
-
-    // Create a worker if supported
-    let worker = null;
-    if (state.useWebWorker) {
-        try {
-            worker = new Worker('export-worker.js');
-            console.log('Export worker created successfully');
-        } catch (e) {
-            console.error('Failed to create export worker:', e);
-            worker = null;
-            state.useWebWorker = false; // Fall back to standard rendering
-        }
-    }
-
     // Create a hidden video element to display the canvas recording
     const videoPreview = document.createElement('video');
     videoPreview.controls = true;
@@ -2321,15 +2303,9 @@ function startExport() {
     const allImagePromises = [];
     const allImageElements = {};
 
-    // For Web Worker, we need to store image data
-    const mediaItemsWithImageData = [];
-
     // Create a map of all clips and highlights by time for faster lookup
     const clipsByTime = {};
     const highlightsByTime = {};
-
-    // Prepare start screen data for the worker
-    let startScreenData = null;
 
     // Use the exact audio duration for the export (locked to audio length)
     const exactDuration = state.audioDuration;
@@ -2358,26 +2334,6 @@ function startExport() {
             allImageElements['startScreenBackground'] = backgroundImg;
             // Also store it with the media ID for use in clips
             allImageElements[startScreenItem.id] = backgroundImg;
-
-            // For Web Worker, capture the start screen image data
-            if (state.useWebWorker) {
-                // Create a temporary canvas to get image data
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = backgroundImg.width;
-                tempCanvas.height = backgroundImg.height;
-                const tempCtx = tempCanvas.getContext('2d');
-                tempCtx.drawImage(backgroundImg, 0, 0);
-
-                // Get image data as array buffer for transfer to worker
-                const imageData = tempCtx.getImageData(0, 0, backgroundImg.width, backgroundImg.height);
-
-                // Store start screen data for the worker
-                startScreenData = {
-                    width: backgroundImg.width,
-                    height: backgroundImg.height,
-                    imageData: imageData.data.buffer // ArrayBuffer for transferring
-                };
-            }
 
             // Create a separate title overlay if there's a title
             if (state.videoTitle) {
@@ -2521,38 +2477,12 @@ function startExport() {
         if (!allImageElements[mediaItem.id]) {
             console.log(`Preloading image for media item: ${mediaItem.name}`);
 
-            const promise = new Promise((resolve) => {
+            const promise = new Promise((resolve, reject) => {
                 const img = new Image();
                 img.crossOrigin = "anonymous"; // Add this to avoid CORS issues
 
                 img.onload = () => {
                     console.log(`Image loaded for ${mediaItem.name}: ${img.width}x${img.height}`);
-
-                    // Store the image element
-                    allImageElements[mediaItem.id] = img;
-
-                    // For Web Worker, we need to capture the image data
-                    if (state.useWebWorker) {
-                        // Create a temporary canvas to get image data
-                        const tempCanvas = document.createElement('canvas');
-                        tempCanvas.width = img.width;
-                        tempCanvas.height = img.height;
-                        const tempCtx = tempCanvas.getContext('2d');
-                        tempCtx.drawImage(img, 0, 0);
-
-                        // Get image data as array buffer for transfer to worker
-                        const imageData = tempCtx.getImageData(0, 0, img.width, img.height);
-
-                        // Store image data with media item
-                        mediaItemsWithImageData.push({
-                            id: mediaItem.id,
-                            name: mediaItem.name,
-                            width: img.width,
-                            height: img.height,
-                            imageData: imageData.data.buffer // ArrayBuffer for transferring
-                        });
-                    }
-
                     resolve(img);
                 };
 
@@ -2564,6 +2494,9 @@ function startExport() {
 
                 // Set the source to trigger loading
                 img.src = mediaItem.src;
+
+                // Store the image element
+                allImageElements[mediaItem.id] = img;
             });
 
             allImagePromises.push(promise);
@@ -2932,120 +2865,22 @@ function startExport() {
 
     // Render frames sequentially
     function renderNextFrame(frameNumber) {
-        if (state.useWebWorker && worker) {
-            // Use Web Worker for rendering
-            if (frameNumber === 0) {
-                // Initialize the worker with export settings
-                worker.postMessage({
-                    type: 'init',
-                    data: {
-                        frameCount: frameCount,
-                        frameRate: frameRate,
-                        canvasWidth: canvas.width,
-                        canvasHeight: canvas.height
-                    }
-                });
+        // Render the current frame
+        renderFrame(frameNumber);
 
-                // Set up message handler for worker responses
-                worker.onmessage = function(e) {
-                    const { type, frameNumber, imageData, progress } = e.data;
-
-                    switch (type) {
-                        case 'initialized':
-                            console.log('Worker initialized, starting frame rendering');
-                            // Start rendering the first frame
-                            requestAnimationFrame(() => {
-                                renderNextFrameWithWorker(0);
-                            });
-                            break;
-
-                        case 'frameRendered':
-                            // Draw the rendered frame to the canvas
-                            const imageDataObj = new ImageData(
-                                new Uint8ClampedArray(imageData),
-                                canvas.width,
-                                canvas.height
-                            );
-                            ctx.putImageData(imageDataObj, 0, 0);
-
-                            // Update progress
-                            updateExportProgress(Math.min(100, progress));
-
-                            // Schedule the next frame or finish
-                            if (frameNumber < frameCount - 1) {
-                                // Use requestAnimationFrame for better performance
-                                requestAnimationFrame(() => {
-                                    renderNextFrameWithWorker(frameNumber + 1);
-                                });
-                            } else {
-                                // Stop recording when done
-                                console.log('All frames rendered, stopping recording');
-                                setTimeout(() => {
-                                    recorder.stop();
-                                    exportAudioSource.stop();
-                                    hideExportModal();
-
-                                    // Terminate the worker
-                                    worker.postMessage({ type: 'terminate' });
-                                }, 1000); // Give a second to ensure all frames are captured
-                            }
-                            break;
-                    }
-                };
-
-                // Handle worker errors
-                worker.onerror = function(e) {
-                    console.error('Worker error:', e);
-                    alert('Error during export. Falling back to standard rendering.');
-
-                    // Fall back to standard rendering
-                    state.useWebWorker = false;
-                    renderNextFrame(frameNumber);
-                };
-            }
-
-            // Function to render a frame using the worker
-            function renderNextFrameWithWorker(frameNum) {
-                // Prepare transfer list for ArrayBuffers
-                const transferList = [];
-
-                // Collect all ArrayBuffers that need to be transferred
-                if (frameNum === 0 && startScreenData) {
-                    transferList.push(startScreenData.imageData);
-                }
-
-                // Send the frame data to the worker
-                worker.postMessage({
-                    type: 'renderFrame',
-                    data: {
-                        frameNumber: frameNum,
-                        startScreenData: startScreenData,
-                        clipsByTime: clipsByTime,
-                        highlightsByTime: highlightsByTime,
-                        mediaItems: mediaItemsWithImageData,
-                        videoTitle: state.videoTitle
-                    }
-                }, transferList);
-            }
+        // Schedule the next frame or finish
+        if (frameNumber < frameCount) {
+            // Use setTimeout to ensure consistent frame timing
+            setTimeout(() => {
+                renderNextFrame(frameNumber + 1);
+            }, frameDuration);
         } else {
-            // Standard rendering without Web Worker
-            // Render the current frame
-            renderFrame(frameNumber);
-
-            // Schedule the next frame or finish
-            if (frameNumber < frameCount) {
-                // Use setTimeout to ensure consistent frame timing
-                setTimeout(() => {
-                    renderNextFrame(frameNumber + 1);
-                }, frameDuration);
-            } else {
-                // Stop recording when done
-                setTimeout(() => {
-                    recorder.stop();
-                    exportAudioSource.stop();
-                    hideExportModal();
-                }, 1000); // Give a second to ensure all frames are captured
-            }
+            // Stop recording when done
+            setTimeout(() => {
+                recorder.stop();
+                exportAudioSource.stop();
+                hideExportModal();
+            }, 1000); // Give a second to ensure all frames are captured
         }
     }
 }
@@ -3168,13 +3003,6 @@ function showExportModal() {
         formatInfo.className = 'export-format-info';
         formatInfo.textContent = `Format: ${state.exportFormat.toUpperCase()}`;
 
-        // Add info about background processing
-        const backgroundInfo = document.createElement('p');
-        backgroundInfo.className = 'background-info';
-        backgroundInfo.innerHTML = state.useWebWorker ?
-            'Export is running in the background. You can continue using the app while it processes.' :
-            'Export is processing. Please wait until it completes.';
-
         const progressContainer = document.createElement('div');
         progressContainer.className = 'progress-container';
 
@@ -3192,7 +3020,6 @@ function showExportModal() {
 
         modalContent.appendChild(title);
         modalContent.appendChild(formatInfo);
-        modalContent.appendChild(backgroundInfo);
         modalContent.appendChild(progressContainer);
         modal.appendChild(modalContent);
 
