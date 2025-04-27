@@ -2075,36 +2075,12 @@ function exportMovie() {
         return;
     }
 
-    // Check if FFmpeg.wasm is supported
-    state.useFFmpeg = isFFmpegSupported();
-
-    if (state.useFFmpeg) {
-        console.log('FFmpeg.wasm is supported. Will use it for better synchronization.');
-    } else {
-        console.log('FFmpeg.wasm is not supported in this browser environment.');
-        console.log('Using standard browser-based export instead.');
-
-        // Show a message to the user about potential synchronization issues
-        const useStandardExport = confirm(
-            'Your browser does not support the advanced export features needed for perfect synchronization.\n\n' +
-            'You can still export your movie using the standard method, but there might be slight timing differences ' +
-            'between the preview and the exported video.\n\n' +
-            'For best results, consider using a Chromium-based browser (Chrome, Edge, etc.) ' +
-            'with a proper server configuration.\n\n' +
-            'Continue with standard export?'
-        );
-
-        if (!useStandardExport) {
-            return; // User cancelled the export
-        }
-    }
-
     // Show format selection modal
     showExportFormatModal();
 }
 
 // Start the export process after format selection
-async function startExport() {
+function startExport() {
     updateStatus(`Preparing to export movie in ${state.exportFormat.toUpperCase()} format...`);
 
     // Create a hidden canvas for rendering
@@ -2115,29 +2091,6 @@ async function startExport() {
     canvas.style.display = 'none';
 
     const ctx = canvas.getContext('2d');
-
-    // Show export progress modal
-    showExportModal();
-
-    // If FFmpeg.wasm is supported and available, use it for better synchronization
-    if (state.useFFmpeg) {
-        try {
-            // Initialize FFmpeg
-            await initFFmpeg();
-
-            // Use FFmpeg for export
-            const success = await exportWithFFmpeg(canvas, ctx);
-            if (success) {
-                // If FFmpeg export was successful, return early
-                return;
-            }
-            // Otherwise, fall through to browser-based export
-        } catch (error) {
-            console.error('Error using FFmpeg.wasm:', error);
-            updateStatus('Error with FFmpeg.wasm export. Falling back to browser-based export.');
-            // Fall back to browser-based export
-        }
-    }
 
     // Create a hidden video element to display the canvas recording
     const videoPreview = document.createElement('video');
@@ -2782,39 +2735,38 @@ async function startExport() {
         // Draw highlights for this frame
         const activeHighlights = highlightsByTime[frameNumber] || [];
         if (activeHighlights.length > 0) {
-            console.log(`Drawing ${activeHighlights.length} highlights for frame ${frameNumber}`);
-
-            // Save context state
-            ctx.save();
+            // Only log highlight info every 30 frames to reduce console overhead
+            if (frameNumber % 30 === 0) {
+                console.log(`Drawing ${activeHighlights.length} highlights for frame ${frameNumber}`);
+            }
 
             // Draw each highlight
-            activeHighlights.forEach(highlight => {
+            for (let i = 0; i < activeHighlights.length; i++) {
+                const highlight = activeHighlights[i];
+
                 // Calculate animation progress (0 to 1) using the exact frame
-                const exactStartFrame = highlight.exactFrame; // Use the stored exact frame
+                const exactStartFrame = highlight.exactFrame;
                 const highlightProgress = (frameNumber - exactStartFrame) / (highlight.duration * frameRate);
 
                 // Ensure progress is between 0 and 1
                 const clampedProgress = Math.max(0, Math.min(1, highlightProgress));
 
-                console.log(`Drawing highlight at frame ${frameNumber}, time ${currentTime.toFixed(3)}s, exact start: ${exactStartFrame} (${(exactStartFrame/frameRate).toFixed(3)}s), progress: ${clampedProgress.toFixed(3)}`);
-
                 // Draw the highlight pulse
                 drawHighlightPulse(ctx, highlight.x / 100 * canvas.width, highlight.y / 100 * canvas.height, clampedProgress);
-            });
-
-            // Restore context state
-            ctx.restore();
+            }
         }
 
-        // Update progress in the modal
-        const progress = (frameNumber / frameCount) * 100;
-        updateExportProgress(Math.min(100, progress));
+        // Update progress in the modal (only update every 5 frames to reduce overhead)
+        if (frameNumber % 5 === 0) {
+            const progress = (frameNumber / frameCount) * 100;
+            updateExportProgress(Math.min(100, progress));
+        }
     }
 
     // Note: The drawVideoTitle function has been removed as we now pre-render the title
     // directly into the start screen image for better reliability
 
-    // Draw a highlight pulse animation
+    // Draw a highlight pulse animation (optimized)
     function drawHighlightPulse(ctx, x, y, progress) {
         // Use a more precise animation curve that matches the CSS animation
         // This ensures the exported video animation matches what users see in the preview
@@ -2835,107 +2787,126 @@ async function startExport() {
         // Use a linear fade for opacity
         const opacity = Math.max(0, 0.9 - progress * 0.9);
 
-        // Draw outer glow
-        const gradient = ctx.createRadialGradient(x, y, radius * 0.7, x, y, radius);
-        gradient.addColorStop(0, `rgba(1, 99, 98, ${opacity * 0.8})`); // Dark green color
-        gradient.addColorStop(1, `rgba(1, 99, 98, 0)`);
+        // Save current context state for better performance
+        ctx.save();
 
-        ctx.fillStyle = gradient;
+        // Use a single path operation for better performance
+        // Draw outer glow (simplified for performance)
+        ctx.fillStyle = `rgba(1, 99, 98, ${opacity * 0.8})`;
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
 
         // Draw inner circle with red border
-        ctx.fillStyle = `rgba(1, 99, 98, ${opacity * 0.9})`; // Dark green color
-        ctx.strokeStyle = `rgba(255, 0, 0, ${opacity * 0.9})`; // Changed to red border
+        ctx.fillStyle = `rgba(1, 99, 98, ${opacity * 0.9})`;
+        ctx.strokeStyle = `rgba(255, 0, 0, ${opacity * 0.9})`;
         ctx.lineWidth = 3;
 
         ctx.beginPath();
         ctx.arc(x, y, radius * 0.4, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
+
+        // Restore context state
+        ctx.restore();
     }
 
-    // Helper function to draw images with proper aspect ratio
+    // Helper function to draw images with proper aspect ratio (optimized)
     function drawImageToCanvas(img, ctx, canvasWidth, canvasHeight) {
-        // Check if the image is valid
+        // Check if the image is valid (minimal validation)
         if (!img || !img.complete || img.naturalWidth === 0) {
-            console.error("Invalid image passed to drawImageToCanvas");
-            // Draw a placeholder instead
-            ctx.fillStyle = '#f0f0f0';
+            // Use a simple fallback color instead of drawing text (faster)
+            ctx.fillStyle = '#016362'; // Dark green fallback
             ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-
-            // Draw an error message
-            ctx.fillStyle = '#ff0000';
-            ctx.font = '24px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('Image not available', canvasWidth / 2, canvasHeight / 2);
             return;
         }
 
-        // Save the current context state
-        ctx.save();
+        // Calculate dimensions to maintain aspect ratio
+        const imgAspect = img.naturalWidth / img.naturalHeight;
+        const canvasAspect = canvasWidth / canvasHeight;
 
+        let drawWidth, drawHeight, drawX, drawY;
+
+        if (imgAspect > canvasAspect) {
+            // Image is wider than canvas (relative to height)
+            drawWidth = canvasWidth;
+            drawHeight = canvasWidth / imgAspect;
+            drawX = 0;
+            drawY = (canvasHeight - drawHeight) / 2;
+        } else {
+            // Image is taller than canvas (relative to width)
+            drawHeight = canvasHeight;
+            drawWidth = canvasHeight * imgAspect;
+            drawX = (canvasWidth - drawWidth) / 2;
+            drawY = 0;
+        }
+
+        // Draw the image (no logging for better performance)
         try {
-            // Calculate dimensions to maintain aspect ratio
-            const imgAspect = img.naturalWidth / img.naturalHeight;
-            const canvasAspect = canvasWidth / canvasHeight;
-
-            let drawWidth, drawHeight, drawX, drawY;
-
-            if (imgAspect > canvasAspect) {
-                // Image is wider than canvas (relative to height)
-                drawWidth = canvasWidth;
-                drawHeight = canvasWidth / imgAspect;
-                drawX = 0;
-                drawY = (canvasHeight - drawHeight) / 2;
-            } else {
-                // Image is taller than canvas (relative to width)
-                drawHeight = canvasHeight;
-                drawWidth = canvasHeight * imgAspect;
-                drawX = (canvasWidth - drawWidth) / 2;
-                drawY = 0;
-            }
-
-            // Draw the image
-            console.log(`Drawing image: ${img.naturalWidth}x${img.naturalHeight} at ${drawX},${drawY} with size ${drawWidth}x${drawHeight}`);
             ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
         } catch (e) {
-            console.error("Error drawing image to canvas:", e);
-            // Draw a placeholder instead
-            ctx.fillStyle = '#f0f0f0';
+            // Simple fallback on error (no logging or text rendering for better performance)
+            ctx.fillStyle = '#016362'; // Dark green fallback
             ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-
-            // Draw an error message
-            ctx.fillStyle = '#ff0000';
-            ctx.font = '24px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('Error drawing image', canvasWidth / 2, canvasHeight / 2);
-        } finally {
-            // Restore the context state
-            ctx.restore();
         }
     }
 
-    // Render frames sequentially
+    // Render frames sequentially with precise timing
     function renderNextFrame(frameNumber) {
-        // Render the current frame
-        renderFrame(frameNumber);
+        // Calculate the exact time this frame should be rendered
+        const targetTime = startTime + (frameNumber * frameDuration);
+        const now = performance.now();
 
-        // Schedule the next frame or finish
-        if (frameNumber < frameCount) {
-            // Use setTimeout to ensure consistent frame timing
-            setTimeout(() => {
-                renderNextFrame(frameNumber + 1);
-            }, frameDuration);
-        } else {
-            // Stop recording when done
-            setTimeout(() => {
-                recorder.stop();
-                exportAudioSource.stop();
-                hideExportModal();
-            }, 1000); // Give a second to ensure all frames are captured
+        // Calculate how long to wait before rendering this frame
+        // This compensates for any accumulated timing errors
+        const waitTime = Math.max(0, targetTime - now);
+
+        // Log timing information for debugging (every 30 frames)
+        if (frameNumber % 30 === 0) {
+            const drift = now - (startTime + (frameNumber * frameDuration));
+            console.log(`Frame ${frameNumber}: Target time=${Math.round(targetTime-startTime)}ms, ` +
+                        `Actual time=${Math.round(now-startTime)}ms, ` +
+                        `Drift=${Math.round(drift)}ms, ` +
+                        `Wait=${Math.round(waitTime)}ms`);
         }
+
+        // Use a more precise timing approach
+        setTimeout(() => {
+            // Record the actual render start time for this frame
+            const renderStartTime = performance.now();
+
+            // Render the current frame
+            renderFrame(frameNumber);
+
+            // Calculate how long the rendering took
+            const renderDuration = performance.now() - renderStartTime;
+
+            // Schedule the next frame or finish
+            if (frameNumber < frameCount) {
+                // Calculate the next frame's target time
+                const nextFrameTargetTime = startTime + ((frameNumber + 1) * frameDuration);
+                const timeUntilNextFrame = Math.max(0, nextFrameTargetTime - performance.now());
+
+                // If rendering is taking too long, log a warning
+                if (renderDuration > frameDuration * 0.8) {
+                    console.warn(`Frame ${frameNumber} rendering took ${renderDuration.toFixed(2)}ms, ` +
+                                 `which is ${(renderDuration/frameDuration*100).toFixed(1)}% of frame duration!`);
+                }
+
+                // Schedule next frame with adjusted timing
+                setTimeout(() => {
+                    renderNextFrame(frameNumber + 1);
+                }, timeUntilNextFrame);
+            } else {
+                // Stop recording when done
+                console.log('Export rendering complete, stopping recorder...');
+                setTimeout(() => {
+                    recorder.stop();
+                    exportAudioSource.stop();
+                    hideExportModal();
+                }, 1000); // Give a second to ensure all frames are captured
+            }
+        }, waitTime);
     }
 }
 
@@ -3098,16 +3069,6 @@ function updateExportProgress(percent) {
         const roundedPercent = Math.round(percent);
         progressBar.style.width = `${roundedPercent}%`;
         progressText.textContent = `${roundedPercent}%`;
-
-        // Also update status for significant progress milestones
-        if (roundedPercent % 10 === 0 || roundedPercent === 100) {
-            updateStatus(`Exporting movie: ${roundedPercent}% complete`);
-        }
-
-        // Log progress to console for debugging
-        if (roundedPercent % 25 === 0 || roundedPercent === 100) {
-            console.log(`Export progress: ${roundedPercent}%`);
-        }
     }
 }
 
