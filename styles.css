@@ -935,12 +935,12 @@ body {
     height: 150px; /* Increased from 60px */
     transform: translate(-50%, -50%);
     border-radius: 50%;
-    background-color: rgba(1, 99, 98, 0.7); /* Changed to dark green (#016362) */
-    box-shadow: 0 0 20px 10px rgba(1, 99, 98, 0.5); /* Changed to dark green */
+    background-color: rgba(1, 99, 98, 0.7); /* Dark green (#016362) */
+    box-shadow: 0 0 20px 10px rgba(1, 99, 98, 0.5); /* Dark green */
     z-index: 100;
     animation: pulse 2s ease-out; /* Increased duration */
     pointer-events: none; /* Prevent interfering with clicks */
-    border: 3px solid rgba(255, 255, 255, 0.7); /* Added white border */
+    border: 3px solid rgba(255, 0, 0, 0.7); /* Changed to red border */
 }
 
 @keyframes pulse {

@@ -141,6 +141,11 @@ function init() {
 
     // Update status
     updateStatus('Ready');
+
+    // Load the default project from URL
+    const defaultProjectURL = 'https://tiboindii.github.io/FAQmov/project01.indii';
+    console.log('Loading default project from:', defaultProjectURL);
+    loadProjectFromURL(defaultProjectURL);
 }
 
 // Preload the start screen image
@@ -472,6 +477,15 @@ function processAudioFile(audioSrc) {
 
                 // Log the adjustment
                 console.log(`Audio loaded with 3s silence prefix: ${state.audioDuration.toFixed(2)}s, Scale: ${state.timelineScale.toFixed(2)}px/sec`);
+
+                // Enable all playback controls
+                playPauseBtn.disabled = false;
+                stopBtn.disabled = false;
+                rewindStartBtn.disabled = false;
+                rewindStepBtn.disabled = false;
+                forwardStepBtn.disabled = false;
+
+                console.log('Playback controls enabled after audio processing');
                 updateStatus('Audio imported with 3s silence prefix (2s start screen)');
             })
             .catch(error => {
@@ -1974,18 +1988,7 @@ function updatePreview() {
         highlightElement.style.left = `${highlight.x}%`;
         highlightElement.style.top = `${highlight.y}%`;
 
-        // Add a TAP label to make it more visible
-        const label = document.createElement('span');
-        label.style.position = 'absolute';
-        label.style.top = '50%';
-        label.style.left = '50%';
-        label.style.transform = 'translate(-50%, -50%)';
-        label.style.color = 'white';
-        label.style.fontWeight = 'bold';
-        label.style.fontSize = '16px';
-        label.style.textShadow = '0 0 5px rgba(0,0,0,0.7)';
-        label.textContent = 'TAP';
-        highlightElement.appendChild(label);
+        // No text label anymore - just the circle animation
 
         // Add to preview frame
         previewFrame.appendChild(highlightElement);
@@ -2784,22 +2787,15 @@ function startExport() {
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
 
-        // Draw inner circle with white border
+        // Draw inner circle with red border
         ctx.fillStyle = `rgba(1, 99, 98, ${opacity * 0.9})`; // Dark green color
-        ctx.strokeStyle = `rgba(255, 255, 255, ${opacity * 0.9})`;
+        ctx.strokeStyle = `rgba(255, 0, 0, ${opacity * 0.9})`; // Changed to red border
         ctx.lineWidth = 3;
 
         ctx.beginPath();
         ctx.arc(x, y, radius * 0.4, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-
-        // Add "TAP" text
-        ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
-        ctx.font = 'bold 24px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('TAP', x, y);
     }
 
     // Helper function to draw images with proper aspect ratio
@@ -3324,18 +3320,7 @@ function showHighlightAnimation(highlight) {
     highlightElement.style.left = `${highlight.x}%`;
     highlightElement.style.top = `${highlight.y}%`;
 
-    // Add a label to make it more visible during testing
-    const label = document.createElement('span');
-    label.style.position = 'absolute';
-    label.style.top = '50%';
-    label.style.left = '50%';
-    label.style.transform = 'translate(-50%, -50%)';
-    label.style.color = 'white';
-    label.style.fontWeight = 'bold';
-    label.style.fontSize = '16px';
-    label.style.textShadow = '0 0 5px rgba(0,0,0,0.7)';
-    label.textContent = 'TAP';
-    highlightElement.appendChild(label);
+    // No text label anymore - just the circle animation
 
     // Add to preview frame
     previewFrame.appendChild(highlightElement);
@@ -3389,93 +3374,7 @@ function loadProject(file) {
     const reader = new FileReader();
 
     reader.onload = function(e) {
-        try {
-            // Parse project data
-            const projectData = JSON.parse(e.target.result);
-
-            // Reset current state
-            state.clips = [];
-            state.highlights = [];
-            state.mediaItems = [];
-            state.audioFile = null;
-            state.audioBuffer = null;
-            state.audioDuration = 0;
-            state.currentTime = 0;
-
-            // Clear UI elements
-            mediaLibrary.innerHTML = '';
-            imageTrack.innerHTML = '';
-            highlightTrack.innerHTML = '';
-            audioTrack.innerHTML = '<div class="empty-track">Import audio to create timeline</div>';
-
-            // Update project name
-            state.projectName = projectData.name || 'Imported Project';
-
-            // Update video title
-            state.videoTitle = projectData.videoTitle || '';
-            if (videoTitleInput) {
-                videoTitleInput.value = state.videoTitle;
-            }
-
-            // Load media items
-            if (projectData.mediaItems && Array.isArray(projectData.mediaItems)) {
-                projectData.mediaItems.forEach(item => {
-                    state.mediaItems.push(item);
-                    addMediaItemToLibrary(item);
-                });
-            }
-
-            // Load audio file
-            if (projectData.audioFile) {
-                state.audioFile = projectData.audioFile;
-                processAudioFile(projectData.audioFile.src);
-            }
-
-            // Load clips after audio is processed
-            const loadClipsAndHighlights = () => {
-                // Load clips
-                if (projectData.clips && Array.isArray(projectData.clips)) {
-                    projectData.clips.forEach(clip => {
-                        state.clips.push(clip);
-                        createClipElement(clip);
-                    });
-                }
-
-                // Load highlights
-                if (projectData.highlights && Array.isArray(projectData.highlights)) {
-                    projectData.highlights.forEach(highlight => {
-                        state.highlights.push(highlight);
-                        createHighlightMarker(highlight);
-                    });
-                }
-
-                // Update timeline width
-                updateTimelineWidth();
-
-                // Update preview
-                updatePreview();
-
-                updateStatus('Project loaded successfully');
-            };
-
-            // If audio is being processed, wait for it to complete
-            if (projectData.audioFile) {
-                const checkAudioLoaded = () => {
-                    if (state.audioBuffer) {
-                        loadClipsAndHighlights();
-                    } else {
-                        setTimeout(checkAudioLoaded, 100);
-                    }
-                };
-                checkAudioLoaded();
-            } else {
-                loadClipsAndHighlights();
-            }
-        } catch (error) {
-            console.error('Error loading project:', error);
-            alert('Error loading project. The file may be corrupted or in an invalid format.');
-            updateStatus('Error loading project');
-        }
+        processProjectData(e.target.result);
     };
 
     reader.onerror = function() {
@@ -3484,6 +3383,127 @@ function loadProject(file) {
     };
 
     reader.readAsText(file);
+}
+
+// Load project from URL
+function loadProjectFromURL(url) {
+    updateStatus('Loading project from URL...');
+
+    fetch(url)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Network response was not ok: ${response.status}`);
+            }
+            return response.text();
+        })
+        .then(data => {
+            processProjectData(data);
+        })
+        .catch(error => {
+            console.error('Error loading project from URL:', error);
+            alert('Error loading project from URL. Please try again later.');
+            updateStatus('Error loading project from URL');
+        });
+}
+
+// Process project data (common function for both file and URL loading)
+function processProjectData(projectDataText) {
+    try {
+        // Parse project data
+        const projectData = JSON.parse(projectDataText);
+
+        // Reset current state
+        state.clips = [];
+        state.highlights = [];
+        state.mediaItems = [];
+        state.audioFile = null;
+        state.audioBuffer = null;
+        state.audioDuration = 0;
+        state.currentTime = 0;
+
+        // Clear UI elements
+        mediaLibrary.innerHTML = '';
+        imageTrack.innerHTML = '';
+        highlightTrack.innerHTML = '';
+        audioTrack.innerHTML = '<div class="empty-track">Import audio to create timeline</div>';
+
+        // Update project name
+        state.projectName = projectData.name || 'Imported Project';
+
+        // Update video title
+        state.videoTitle = projectData.videoTitle || '';
+        if (videoTitleInput) {
+            videoTitleInput.value = state.videoTitle;
+        }
+
+        // Load media items
+        if (projectData.mediaItems && Array.isArray(projectData.mediaItems)) {
+            projectData.mediaItems.forEach(item => {
+                state.mediaItems.push(item);
+                addMediaItemToLibrary(item);
+            });
+        }
+
+        // Load audio file
+        if (projectData.audioFile) {
+            state.audioFile = projectData.audioFile;
+            processAudioFile(projectData.audioFile.src);
+        }
+
+        // Load clips after audio is processed
+        const loadClipsAndHighlights = () => {
+            // Load clips
+            if (projectData.clips && Array.isArray(projectData.clips)) {
+                projectData.clips.forEach(clip => {
+                    state.clips.push(clip);
+                    createClipElement(clip);
+                });
+            }
+
+            // Load highlights
+            if (projectData.highlights && Array.isArray(projectData.highlights)) {
+                projectData.highlights.forEach(highlight => {
+                    state.highlights.push(highlight);
+                    createHighlightMarker(highlight);
+                });
+            }
+
+            // Update timeline width
+            updateTimelineWidth();
+
+            // Update preview
+            updatePreview();
+
+            updateStatus('Project loaded successfully');
+        };
+
+        // If audio is being processed, wait for it to complete
+        if (projectData.audioFile) {
+            const checkAudioLoaded = () => {
+                if (state.audioBuffer) {
+                    loadClipsAndHighlights();
+
+                    // Enable all playback controls
+                    playPauseBtn.disabled = false;
+                    stopBtn.disabled = false;
+                    rewindStartBtn.disabled = false;
+                    rewindStepBtn.disabled = false;
+                    forwardStepBtn.disabled = false;
+
+                    console.log('Playback controls enabled after project load');
+                } else {
+                    setTimeout(checkAudioLoaded, 100);
+                }
+            };
+            checkAudioLoaded();
+        } else {
+            loadClipsAndHighlights();
+        }
+    } catch (error) {
+        console.error('Error loading project:', error);
+        alert('Error loading project. The file may be corrupted or in an invalid format.');
+        updateStatus('Error loading project');
+    }
 }
 
 // Initialize the application when the DOM is loaded
