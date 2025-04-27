@@ -142,10 +142,21 @@ function init() {
     // Update status
     updateStatus('Ready');
 
-    // Load the default project from URL
-    const defaultProjectURL = 'https://tiboindii.github.io/FAQmov/project01.indii';
-    console.log('Loading default project from:', defaultProjectURL);
-    loadProjectFromURL(defaultProjectURL);
+    // Check if we're coming back from a "New Project" action
+    const isNewProject = sessionStorage.getItem('isNewProject') === 'true';
+
+    if (isNewProject) {
+        // Clear the flag in sessionStorage
+        sessionStorage.removeItem('isNewProject');
+        console.log('Creating a new empty project (not loading default)');
+        // Don't load any project - just leave it empty
+        updateStatus('New project created');
+    } else {
+        // Load the default project from URL
+        const defaultProjectURL = 'https://tiboindii.github.io/FAQmov/project01.indii';
+        console.log('Loading default project from:', defaultProjectURL);
+        loadProjectFromURL(defaultProjectURL);
+    }
 }
 
 // Preload the start screen image
@@ -2064,12 +2075,36 @@ function exportMovie() {
         return;
     }
 
+    // Check if FFmpeg.wasm is supported
+    state.useFFmpeg = isFFmpegSupported();
+
+    if (state.useFFmpeg) {
+        console.log('FFmpeg.wasm is supported. Will use it for better synchronization.');
+    } else {
+        console.log('FFmpeg.wasm is not supported in this browser environment.');
+        console.log('Using standard browser-based export instead.');
+
+        // Show a message to the user about potential synchronization issues
+        const useStandardExport = confirm(
+            'Your browser does not support the advanced export features needed for perfect synchronization.\n\n' +
+            'You can still export your movie using the standard method, but there might be slight timing differences ' +
+            'between the preview and the exported video.\n\n' +
+            'For best results, consider using a Chromium-based browser (Chrome, Edge, etc.) ' +
+            'with a proper server configuration.\n\n' +
+            'Continue with standard export?'
+        );
+
+        if (!useStandardExport) {
+            return; // User cancelled the export
+        }
+    }
+
     // Show format selection modal
     showExportFormatModal();
 }
 
 // Start the export process after format selection
-function startExport() {
+async function startExport() {
     updateStatus(`Preparing to export movie in ${state.exportFormat.toUpperCase()} format...`);
 
     // Create a hidden canvas for rendering
@@ -2080,6 +2115,29 @@ function startExport() {
     canvas.style.display = 'none';
 
     const ctx = canvas.getContext('2d');
+
+    // Show export progress modal
+    showExportModal();
+
+    // If FFmpeg.wasm is supported and available, use it for better synchronization
+    if (state.useFFmpeg) {
+        try {
+            // Initialize FFmpeg
+            await initFFmpeg();
+
+            // Use FFmpeg for export
+            const success = await exportWithFFmpeg(canvas, ctx);
+            if (success) {
+                // If FFmpeg export was successful, return early
+                return;
+            }
+            // Otherwise, fall through to browser-based export
+        } catch (error) {
+            console.error('Error using FFmpeg.wasm:', error);
+            updateStatus('Error with FFmpeg.wasm export. Falling back to browser-based export.');
+            // Fall back to browser-based export
+        }
+    }
 
     // Create a hidden video element to display the canvas recording
     const videoPreview = document.createElement('video');
@@ -3040,6 +3098,16 @@ function updateExportProgress(percent) {
         const roundedPercent = Math.round(percent);
         progressBar.style.width = `${roundedPercent}%`;
         progressText.textContent = `${roundedPercent}%`;
+
+        // Also update status for significant progress milestones
+        if (roundedPercent % 10 === 0 || roundedPercent === 100) {
+            updateStatus(`Exporting movie: ${roundedPercent}% complete`);
+        }
+
+        // Log progress to console for debugging
+        if (roundedPercent % 25 === 0 || roundedPercent === 100) {
+            console.log(`Export progress: ${roundedPercent}%`);
+        }
     }
 }
 
