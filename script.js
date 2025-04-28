@@ -145,12 +145,20 @@ function init() {
     // Check if we're coming back from a "New Project" action
     const isNewProject = sessionStorage.getItem('isNewProject') === 'true';
 
+    // Check if default project loading is disabled
+    const disableDefaultLoading = localStorage.getItem('disableDefaultProjectLoading') === 'true';
+
     if (isNewProject) {
-        // Clear the flag in sessionStorage
+        // Clear the flags
         sessionStorage.removeItem('isNewProject');
         console.log('Creating a new empty project (not loading default)');
         // Don't load any project - just leave it empty
         updateStatus('New project created');
+    } else if (disableDefaultLoading) {
+        // Default project loading is disabled but it's not a new project
+        // This happens when the user has previously created a new project
+        console.log('Default project loading is disabled');
+        updateStatus('Ready to create a new project');
     } else {
         // Load the default project from URL
         const defaultProjectURL = 'https://tiboindii.github.io/FAQmov/project01.indii';
@@ -3181,6 +3189,13 @@ function hideVideoPreview() {
 // Confirm new project
 function confirmNewProject() {
     if (confirm('Start a new project? All unsaved changes will be lost.')) {
+        // Set the flag in sessionStorage to indicate we want a new project
+        sessionStorage.setItem('isNewProject', 'true');
+
+        // Set a flag to disable default project loading
+        localStorage.setItem('disableDefaultProjectLoading', 'true');
+
+        // Reload the page to start fresh
         location.reload();
     }
 }
